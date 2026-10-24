@@ -1,0 +1,15 @@
+.local-tools/
+.gradle/
+**/build/
+local.properties
+diagnostic-reports/
+dist/
+secrets/
+__pycache__/
+*.pyc
+*.apk
+*.jks
+*.keystore
+.rainnotify-private/
+/rainnotify-questions-*/
+/rainnotify-questions-*.zip
