@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -18,7 +20,7 @@ android {
     }
     signingConfigs {
         getByName("debug") {
-            val local = java.util.Properties().apply {
+            val local = Properties().apply {
                 rootProject.file("local.properties").takeIf { it.isFile }?.inputStream()?.use { load(it) }
             }
             (providers.environmentVariable("RAINNOTIFY_DEBUG_KEYSTORE").orNull
