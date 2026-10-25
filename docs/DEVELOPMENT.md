@@ -31,6 +31,8 @@ Linux/macOS 从 `android-app` 调用 `./gradlew`，Windows 也可直接调用 `g
 
 ## 模块与边界
 
+设备 UI 检查在实际 Activity 上定位并激活控件，验证导航、提示及开关状态；使用控件回调避免要求小米额外开放全机触控注入权限。实际触摸命中区域仍需人工检查。每个测试先由测试框架将独立包放到前台，避免厂商后台启动限制。
+
 保留单个 `app` 模块：`auth` 管理登录与雨课堂请求，`monitor` 管理课堂连接与事件，`question` 管理题目和 ZIP，`answer` 管理 AI 适配、求解及提交。`src/debug` 中的 USB 测试入口不进入 Release。诊断不得含账号凭据、题目原文或答案；Release 通过设置页导出诊断，不能依赖 `run-as`。
 
 本轮不迁移页面。后续 Compose/Material 3 与 ViewModel 按页面迁移；工具版本升级和 UI 迁移分别验证。真实课堂提交、多品牌、长时休眠属于产品验收，不由构建通过替代。

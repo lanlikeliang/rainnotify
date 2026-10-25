@@ -2,7 +2,8 @@ package cn.rainnotify.app
 
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.onView
-import androidx.test.espresso.action.ViewActions.click
+import androidx.test.espresso.UiController
+import androidx.test.espresso.ViewAction
 import androidx.test.espresso.action.ViewActions.scrollTo
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.*
@@ -12,6 +13,7 @@ import cn.rainnotify.app.answer.*
 import cn.rainnotify.app.monitor.MonitorState
 import cn.rainnotify.app.question.*
 import org.hamcrest.Matchers.not
+import org.hamcrest.Matchers.allOf
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -25,6 +27,16 @@ import java.util.UUID
 /** Real app UI and Android filesystem; synthetic content only, no cloud or classroom calls. */
 @RunWith(AndroidJUnit4::class)
 class ToolchainSmokeTest {
+    // Exercise real View callbacks/navigation without Xiaomi's global INJECT_EVENTS privilege.
+    // This suite validates control behavior; physical touch delivery remains a manual check.
+    private fun click() = object : ViewAction {
+        override fun getConstraints() = allOf(isDisplayed(), isEnabled())
+        override fun getDescription() = "Activate an enabled application control"
+        override fun perform(controller: UiController, view: android.view.View) {
+            check(view.performClick()) { "Application control did not handle activation" }
+            controller.loopMainThreadUntilIdle()
+        }
+    }
     @Before fun idleDeviceOnly() {
         check(!MonitorState.current().active && !AutoAnswer.armed && AnswerState.task.value?.active != true) {
             "Stop classroom monitoring and answer tasks before running device tests."
