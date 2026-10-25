@@ -8,9 +8,11 @@ param(
     [switch]$Stop
 )
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'toolchain.ps1')
+$tc = Initialize-RainToolchain
 $workspacePath = Split-Path -Parent $PSScriptRoot
-$env:ANDROID_USER_HOME = Join-Path $workspacePath '.local-tools\android-user'
-$adb = Join-Path $workspacePath '.local-tools\android-sdk\platform-tools\adb.exe'
+# Android user directory comes from toolchain configuration.
+$adb = $tc.Adb
 $devices = @(& $adb devices | ForEach-Object { if ($_ -match '^([^\s]+)\s+device$') { $Matches[1] } })
 if ($devices.Count -ne 1) { throw 'Connect exactly one authorized Android device.' }
 if ($QuestionId -and $QuestionId -notmatch '^[0-9a-f-]{36}$') { throw 'Use a local question UUID.' }

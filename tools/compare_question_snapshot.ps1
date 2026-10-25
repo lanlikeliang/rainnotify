@@ -1,8 +1,10 @@
 param([string]$Serial, [string]$QuestionId, [switch]$ReadResult)
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'toolchain.ps1')
+$tc = Initialize-RainToolchain
 $workspacePath = Split-Path -Parent $PSScriptRoot
-$adbPath = Join-Path $workspacePath '.local-tools\android-sdk\platform-tools\adb.exe'
-$env:ANDROID_USER_HOME = Join-Path $workspacePath '.local-tools\android-user'
+$adbPath = $tc.Adb
+# Android user directory comes from toolchain configuration.
 $devices = @(& $adbPath devices | ForEach-Object { if ($_ -match '^([^\s]+)\s+device$') { $Matches[1] } })
 if (-not $Serial -and $devices.Count -eq 1) { $Serial = $devices[0] }
 if (-not $Serial -or $Serial -notin $devices) { throw 'Select one authorized device.' }
