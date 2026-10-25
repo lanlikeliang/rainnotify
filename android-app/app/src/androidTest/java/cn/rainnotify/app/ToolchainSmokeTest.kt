@@ -29,6 +29,13 @@ class ToolchainSmokeTest {
         check(!MonitorState.current().active && !AutoAnswer.armed && AnswerState.task.value?.active != true) {
             "Stop classroom monitoring and answer tasks before running device tests."
         }
+        // Xiaomi may block startActivitySync while the fresh test package is in the background.
+        // Bring only our isolated test app forward using the test runner's shell identity.
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        check(instrumentation.targetContext.packageName == "cn.rainnotify.app.smoke")
+        android.os.ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(
+            "am start -W -f 0x10008000 -n cn.rainnotify.app.smoke/cn.rainnotify.app.MainActivity"
+        )).use { it.readBytes() }
     }
     @Test fun homeShowsPrimaryActionsAndDisablesInactiveStop() {
         ActivityScenario.launch(MainActivity::class.java).use {

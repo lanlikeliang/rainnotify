@@ -8,7 +8,7 @@
 
 Windows 本机可复制 `toolchain.example.json` 为 `.toolchain.local.json`，填写绝对路径；或传入 `-JdkPath`、`-SdkPath`，使用 `JAVA_HOME`、`ANDROID_HOME`。不要提交本机配置。IDE 的 Gradle JDK、Gradle user home 应与命令行一致；SDK 写在忽略的 `android-app/local.properties`。
 
-调试证书可通过 `RAINNOTIFY_DEBUG_KEYSTORE` 或 `android-app/local.properties` 的 `rainnotify.debugKeystore` 指定。迁移现有开发环境须保留原调试证书；全新开发者可使用自己生成的证书，但不能覆盖原证书签名的预览版。Java properties 文件内路径用 `/`，非 ASCII 字符用 Unicode 转义。
+调试证书由 IDE 与命令行共同读取 `.toolchain.local.json` 的 `DebugKeystorePath`；也支持 `RAINNOTIFY_DEBUG_KEYSTORE` 覆盖和 `local.properties` 的 `rainnotify.debugKeystore`。迁移现有开发环境须保留原调试证书；全新开发者可使用自己生成的证书，但不能覆盖原证书签名的预览版。Java properties 文件内路径用 `/`，非 ASCII 字符用 Unicode 转义。
 
 ## 常用命令
 

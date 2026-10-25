@@ -12,9 +12,6 @@ class AppScreen(private val activity: Activity, title: String, subtitle: String)
     val body = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
     private val pad = (20 * activity.resources.displayMetrics.density).toInt()
     init {
-        activity.window.insetsController?.setSystemBarsAppearance(
-            WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
-            WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS)
         body.setBackgroundColor(Color.rgb(246, 248, 252))
         body.setOnApplyWindowInsetsListener { view, insets ->
             val bars = insets.getInsets(WindowInsets.Type.systemBars())
@@ -23,6 +20,10 @@ class AppScreen(private val activity: Activity, title: String, subtitle: String)
         text(title, 27f).setTypeface(null, Typeface.BOLD)
         text(subtitle, 15f)
         activity.setContentView(ScrollView(activity).apply { isFillViewport = true; addView(body) })
+        // The window decor must exist before accessing its insets controller on Android 16.
+        activity.window.insetsController?.setSystemBarsAppearance(
+            WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
+            WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS)
         body.requestApplyInsets()
     }
     fun text(value: String, size: Float = 16f, parent: LinearLayout = body) = TextView(activity).apply {
