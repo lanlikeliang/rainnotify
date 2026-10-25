@@ -31,12 +31,18 @@ android {
     }
     buildTypes {
         debug { applicationIdSuffix = ".debug" }
+        create("smoke") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".smoke"
+            matchingFallbacks += listOf("debug")
+        }
         release {
             isDebuggable = false
             isMinifyEnabled = false
             // Release signing is performed locally by package_release.ps1.
         }
     }
+    testBuildType = "smoke"
     buildFeatures { buildConfig = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

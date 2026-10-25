@@ -18,7 +18,7 @@ $initialDirty = [bool]((& git -C $tc.Root status --porcelain | Out-String).Trim(
 $gradleArgs = @('--project-dir', $project, '--no-daemon', '--console=plain', '--max-workers=2', "-PgitCommit=$commit", ":app:assemble$Variant")
 if ($Lint) { $gradleArgs += ":app:lint$Variant" }
 if ($UnitTests) { $gradleArgs += ":app:test${Variant}UnitTest" }
-if ($DeviceTests) { $gradleArgs += ':app:connectedDebugAndroidTest' }
+if ($DeviceTests) { $gradleArgs += @(':app:assembleSmoke', ':app:assembleSmokeAndroidTest') }
 if ($Offline) { $gradleArgs += '--offline' }
 if ($VersionCode -gt 0) { $gradleArgs += "-PreleaseVersionCode=$VersionCode" }
 if ($VersionName) {
@@ -29,6 +29,7 @@ if ($WriteVerification) { $gradleArgs += @('--write-verification-metadata', 'sha
 Push-Location $project
 try { & $wrapper @gradleArgs; $code = $LASTEXITCODE } finally { Pop-Location }
 if ($code -ne 0) { throw "Gradle failed with exit code $code" }
+if ($DeviceTests) { & (Join-Path $PSScriptRoot 'run_device_tests.ps1') }
 $output = if ($Variant -eq 'Debug') { 'app\build\outputs\apk\debug\app-debug.apk' } else { 'app\build\outputs\apk\release\app-release-unsigned.apk' }
 $apk = Join-Path $project $output
 $dirty = $initialDirty -or [bool]((& git -C $tc.Root status --porcelain | Out-String).Trim()) -or ((& git -C $tc.Root rev-parse HEAD | Out-String).Trim() -ne $commit)

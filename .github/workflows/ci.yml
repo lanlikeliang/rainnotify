@@ -41,7 +41,7 @@ jobs:
           ./gradlew --no-daemon --console=plain --max-workers=2
           -PgitCommit=${GITHUB_SHA}
           :app:testDebugUnitTest :app:lintDebug :app:lintRelease
-          :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest
+          :app:assembleDebug :app:assembleRelease :app:assembleSmoke :app:assembleSmokeAndroidTest
       - name: Prevent new lint findings
         run: |
           python tools/check_lint.py android-app/app/build/reports/lint-results-debug.xml
