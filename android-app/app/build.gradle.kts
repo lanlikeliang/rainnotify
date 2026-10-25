@@ -1,4 +1,5 @@
 import java.util.Properties
+import groovy.json.JsonSlurper
 
 plugins {
     alias(libs.plugins.android.application)
@@ -23,7 +24,10 @@ android {
             val local = Properties().apply {
                 rootProject.file("local.properties").takeIf { it.isFile }?.inputStream()?.use { load(it) }
             }
+            val localToolchain = rootProject.file("../.toolchain.local.json").takeIf { it.isFile }
+                ?.let { JsonSlurper().parse(it) as Map<*, *> }
             (providers.environmentVariable("RAINNOTIFY_DEBUG_KEYSTORE").orNull
+                ?: (localToolchain?.get("DebugKeystorePath") as? String)?.takeIf { it.isNotBlank() }
                 ?: local.getProperty("rainnotify.debugKeystore"))?.let {
                 storeFile = file(it)
             }
