@@ -14,6 +14,7 @@ $javaVersion = (& (Join-Path $tc.Jdk 'bin\java.exe') -version 2>&1 | Out-String)
 if ($javaVersion -notmatch 'version "17\.') { throw 'The pinned build baseline requires JDK 17.' }
 $commit = (& git -C $tc.Root rev-parse HEAD | Out-String).Trim()
 if ($LASTEXITCODE) { throw 'A Git checkout is required for traceable builds.' }
+$initialDirty = [bool]((& git -C $tc.Root status --porcelain | Out-String).Trim())
 $gradleArgs = @('--project-dir', $project, '--no-daemon', '--console=plain', '--max-workers=2', "-PgitCommit=$commit", ":app:assemble$Variant")
 if ($Lint) { $gradleArgs += ":app:lint$Variant" }
 if ($UnitTests) { $gradleArgs += ":app:test${Variant}UnitTest" }
@@ -30,7 +31,7 @@ try { & $wrapper @gradleArgs; $code = $LASTEXITCODE } finally { Pop-Location }
 if ($code -ne 0) { throw "Gradle failed with exit code $code" }
 $output = if ($Variant -eq 'Debug') { 'app\build\outputs\apk\debug\app-debug.apk' } else { 'app\build\outputs\apk\release\app-release-unsigned.apk' }
 $apk = Join-Path $project $output
-$dirty = [bool]((& git -C $tc.Root status --porcelain | Out-String).Trim())
+$dirty = $initialDirty -or [bool]((& git -C $tc.Root status --porcelain | Out-String).Trim()) -or ((& git -C $tc.Root rev-parse HEAD | Out-String).Trim() -ne $commit)
 $receipt = [ordered]@{variant=$Variant;commit=$commit;dirty=$dirty;apk=$apk;sha256=(Get-FileHash -LiteralPath $apk -Algorithm SHA256).Hash;unitTests=[bool]$UnitTests;lint=[bool]$Lint;deviceTests=[bool]$DeviceTests;utc=[DateTime]::UtcNow.ToString('o')}
 [IO.File]::WriteAllText(($apk + '.build.json'), ($receipt | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
 $receipt | ConvertTo-Json

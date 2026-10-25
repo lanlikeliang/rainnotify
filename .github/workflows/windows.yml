@@ -12,16 +12,23 @@ jobs:
       - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00
         with:
           distribution: microsoft
+          java-version: '21'
+      - name: Android SDK packages
+        shell: pwsh
+        run: |
+          & "$env:ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager.bat" 'platforms;android-36' 'build-tools;35.0.0'
+          if ($LASTEXITCODE) { throw 'SDK installation failed' }
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00
+        with:
+          distribution: microsoft
           java-version: '17'
           cache: gradle
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
-      - name: SDK and script validation
+      - name: Script validation
         shell: pwsh
         run: |
-          & sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
-          if ($LASTEXITCODE) { throw 'SDK installation failed' }
           Get-ChildItem tools -Filter *.ps1 | ForEach-Object {
             $parseErrors=$null
             [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$null,[ref]$parseErrors)
