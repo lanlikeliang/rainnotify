@@ -3,14 +3,10 @@ package cn.rainnotify.app.question
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.BitmapFactory
-import android.net.Uri
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.provider.DocumentsContract
 import androidx.lifecycle.MutableLiveData
 import cn.rainnotify.app.Diagnostics
-import cn.rainnotify.app.BuildConfig
 import cn.rainnotify.app.auth.RainApi
 import cn.rainnotify.app.auth.RainFailure
 import java.io.File
@@ -26,7 +22,6 @@ class QuestionRepository private constructor(context: Context) {
     private val app = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
-    private val exports = Executors.newSingleThreadExecutor()
     private val files = QuestionFiles(File(app.noBackupFilesDir, "questions-v1"))
     private val images = QuestionImages()
     private val pending = ConcurrentHashMap.newKeySet<String>()
@@ -35,6 +30,9 @@ class QuestionRepository private constructor(context: Context) {
     private val liveRecords = ConcurrentHashMap<String, Binding>()
     @Volatile private var binding: Binding? = null
     val records = MutableLiveData<List<QuestionRecord>>(emptyList())
+    val latest = MutableLiveData<QuestionRecord?>(null)
+    @Volatile private var latestId: String? = null
+    fun hideLatest() { latestId = null; latest.value = null }
     val liveLesson = MutableLiveData<String?>(null)
 
     init {
@@ -48,6 +46,7 @@ class QuestionRepository private constructor(context: Context) {
 
     fun attach(lesson: String, api: RainApi, connection: LessonConnection, accountScope: String) {
         liveRecords.clear()
+        hideLatest()
         binding = Binding(lesson, api, connection, accountScope)
         liveLesson.value = lesson
     }
@@ -63,6 +62,8 @@ class QuestionRepository private constructor(context: Context) {
     fun capture(reference: QuestionRef): String {
         val id = UUID.randomUUID().toString()
         val record = QuestionRecord(id, reference, System.currentTimeMillis())
+        latestId = id
+        latest.value = record
         val version = generation.get()
         val active = binding
         if (active != null) liveRecords[id] = active
@@ -179,49 +180,6 @@ class QuestionRepository private constructor(context: Context) {
     fun prepare(id: String, directory: File) = files.prepare(id, directory)
     fun isLoading(id: String) = id in pending || files.records().firstOrNull { it.id == id }?.loading == true
 
-    fun importSamples(source: Uri, completed: (String) -> Unit) {
-        exports.execute {
-            val staging = File(app.cacheDir, "question-import-" + UUID.randomUUID())
-            val result = try {
-                val count = app.contentResolver.openInputStream(source)?.use { QuestionImport.read(it, staging, files) }
-                    ?: throw AnswerFailure("无法读取样本 ZIP。")
-                publish()
-                "已导入 " + count + " 道离线样本，可进行 AI 演练。"
-            } catch (e: Exception) {
-                (e as? AnswerFailure)?.display ?: "样本导入失败，请选择本 App 导出的完整 ZIP。"
-            } finally { staging.deleteRecursively() }
-            main.post { completed(result) }
-        }
-    }
-
-    fun export(id: String?, destination: Uri, completed: (QuestionExportSummary?) -> Unit) {
-        exports.execute {
-            var archive: File? = null
-            val result = try {
-                val directory = File(app.cacheDir, "question-exports").apply { mkdirs() }
-                // Single export queue: clean only our staging archives left by an interrupted export.
-                directory.listFiles()?.filter { it.isFile && it.name.endsWith(".zip") &&
-                    QuestionFiles.validId(it.name.removeSuffix(".zip")) }?.forEach { it.delete() }
-                val staging = File(directory, UUID.randomUUID().toString() + ".zip")
-                archive = staging
-                val summary = staging.outputStream().use {
-                    files.export(it, QuestionExportInfo(BuildConfig.VERSION_NAME, Build.VERSION.SDK_INT,
-                        Build.MANUFACTURER, Build.MODEL), id)
-                }
-                app.contentResolver.openOutputStream(destination, "wt")?.use { output ->
-                    staging.inputStream().use { it.copyTo(output) }
-                } ?: error("Export destination unavailable")
-                summary
-            } catch (_: Exception) {
-                // Never leave a partial archive looking like a successful export.
-                try { DocumentsContract.deleteDocument(app.contentResolver, destination) } catch (_: Exception) { }
-                Diagnostics.record(app, "question_export_failed")
-                null
-            } finally { archive?.delete() }
-            main.post { completed(result) }
-        }
-    }
-
     fun clear() {
         generation.incrementAndGet()
         liveRecords.clear()
@@ -231,7 +189,11 @@ class QuestionRepository private constructor(context: Context) {
 
     private fun publish() {
         val snapshot = files.records()
-        main.post { records.value = snapshot }
+        main.post {
+            records.value = snapshot
+            // A queued publish from an older capture must never replace a newer question.
+            snapshot.firstOrNull { it.id == latestId }?.let { latest.value = it }
+        }
     }
 
     companion object {

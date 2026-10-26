@@ -4,6 +4,7 @@ import groovy.json.JsonSlurper
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
 }
 
 android {
@@ -14,8 +15,8 @@ android {
         applicationId = "cn.rainnotify.app"
         minSdk = 36
         targetSdk = 36
-        versionCode = providers.gradleProperty("releaseVersionCode").orElse("20").get().toInt()
-        versionName = providers.gradleProperty("releaseVersionName").orElse("0.1.0-internal").get()
+        versionCode = providers.gradleProperty("releaseVersionCode").orElse("21").get().toInt()
+        versionName = providers.gradleProperty("releaseVersionName").orElse("0.1.1-internal").get()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "GIT_COMMIT", "\"${providers.gradleProperty("gitCommit").orElse("local").get().replace(Regex("[^a-zA-Z0-9-]"), "")}\"")
     }
@@ -47,7 +48,7 @@ android {
         }
     }
     testBuildType = "smoke"
-    buildFeatures { buildConfig = true }
+    buildFeatures { buildConfig = true; compose = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -58,6 +59,13 @@ kotlin { jvmToolchain(17) }
 
 dependencies {
     implementation(libs.androidx.activity)
+    implementation(libs.activity.compose)
+    implementation(libs.compose.ui)
+    implementation(libs.compose.preview)
+    implementation(libs.compose.livedata)
+    implementation(libs.compose.material3)
+    debugImplementation(libs.compose.tooling)
+    androidTestImplementation(libs.compose.test)
     implementation(libs.androidx.livedata)
     implementation(libs.okhttp)
     testImplementation(libs.junit)

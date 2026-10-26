@@ -1,8 +1,10 @@
 # 雨课堂助手 RainNotify
 
-面向普通版雨课堂的原生 Kotlin Android 辅助 App，当前最低 Android 16。已有登录、课堂监听、新题通知、题干/选项/原图采集、ZIP 导入导出、AI App 辅助及 DeepSeek API 求解与提交流程。
+面向普通版雨课堂的原生 Kotlin Android 辅助 App，当前最低 Android 16。通过雨课堂授权、课堂监听与手机直接调用 DeepSeek API，实现新题提醒、题干/选项/原图展示、AI 求解与校验提交。
 
 本仓库从 `v0.0.19-baseline` 原型建立正式开发基础，当前产物为内部验证包。真实课堂提交、长时休眠和多品牌稳定性仍待验收，不标记为 1.0 稳定版。
+
+0.1.1-internal 已实现 API-only 的 Compose 界面：课堂、题目、设置三个入口；同一个胶囊控件选择“关闭 / 发题通知 / 自动答题”。发题通知不需要 API Key，自动答题须完成当前模型图文自检。界面不再提供历史演练、题目导入导出、AI App 或无障碍配置。最新规格见 [API 正式版界面](docs/design/API_ONLY_UI.md)，验证边界见 [本次实现记录](docs/API_ONLY_IMPLEMENTATION.md)。
 
 - [开发、环境、测试与发布](docs/DEVELOPMENT.md)
 - [内部验证包安装](docs/INSTALL.md)

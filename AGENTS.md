@@ -8,6 +8,6 @@ Native Kotlin Android app, API 36 only. Read `docs/DEVELOPMENT.md` before changi
 - Keep protocol and submission changes separate from UI/toolchain changes. Never retry an ambiguous submission automatically.
 - Tests use synthetic data and localhost HTTP. Real accounts/API keys stay on the phone; tests do not enter classrooms or submit real answers.
 - Do not commit raw classroom exports, PDFs, logs, screenshots, local tool config or signing keys. Diagnostics must exclude question/answer text and credentials.
-- Native AI accessibility checks must not use `uiautomator dump` concurrently with the active assistant service.
+- Product UI is API-only: do not reintroduce AI-app accessibility automation or history/rehearsal screens. Synthetic regression belongs in tests.
 - Debug and release are different packages. Release diagnostics come from user-initiated in-app export; `run-as` is debug-only.
 - No test execution is evidence of actual classroom acceptance. Record verified and unverified behavior separately.

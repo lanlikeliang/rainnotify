@@ -13,6 +13,7 @@ import android.os.Looper
 import android.os.SystemClock
 import cn.rainnotify.app.answer.AnswerProtocol
 import cn.rainnotify.app.answer.AutoAnswer
+import cn.rainnotify.app.answer.SolverSettings
 import cn.rainnotify.app.Diagnostics
 import cn.rainnotify.app.NotificationReadiness
 import cn.rainnotify.app.ProbeNotifications
@@ -32,6 +33,8 @@ class LessonMonitorService : Service() {
     @Volatile private var api: RainApi? = null
     private var connection: LessonConnection? = null
     private var begun = false
+    private var pendingAutomatic = false
+    private var requestedRevision = -1L
     private var network: Network? = null
     private var validated = false
     private var blocked = false
@@ -70,7 +73,7 @@ class LessonMonitorService : Service() {
         startForeground(MonitorNotifications.STATUS_ID,
             MonitorNotifications.status(this, "正在准备课堂监听…"),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        MonitorState.update(MonitorUiState(active = true, message = "正在准备课堂监听…"))
+        MonitorState.update(MonitorState.current().copy(active = true, message = "正在准备课堂监听…"))
         // Android delivers these callbacks on the supplied main handler, in order.
         try {
             connectivity.registerDefaultNetworkCallback(networkCallback, main)
@@ -83,7 +86,13 @@ class LessonMonitorService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (MonitorState.stopRequested) { finish("监听已关闭。"); return START_NOT_STICKY }
         if (intent?.action == STOP) { finish("已停止课堂监听。"); return START_NOT_STICKY }
+        if (intent?.action == NOTIFY_ONLY) {
+            pendingAutomatic = false
+            AutoAnswer.disarm(this)
+            return START_NOT_STICKY
+        }
         if (begun || !alive.get()) return START_NOT_STICKY
         val lessonId = intent?.getStringExtra(LESSON_ID)
         if (intent?.action != START || LessonProtocol.id(lessonId) == null) {
@@ -95,6 +104,10 @@ class LessonMonitorService : Service() {
             return START_NOT_STICKY
         }
         begun = true
+        pendingAutomatic = intent.getBooleanExtra(AUTOMATIC, false)
+        requestedRevision = SolverSettings.revision(this)
+        MonitorState.update(MonitorState.current().copy(lessonId = lessonId,
+            lessonName = intent.getStringExtra(LESSON_NAME)))
         update("正在校验所选课堂并进入，可能记录签到…")
         Diagnostics.record(this, "monitor_manual_start")
         worker.execute {
@@ -105,18 +118,18 @@ class LessonMonitorService : Service() {
                     if (alive.get()) Diagnostics.record(this, kind, fields)
                 })
                 api = candidate
-                if (!alive.get()) { candidate.cancel(); return@execute }
+                if (!alive.get() || MonitorState.stopRequested) { candidate.cancel(); return@execute }
                 candidate.validateSession()
-                if (!alive.get()) return@execute
+                if (!alive.get() || MonitorState.stopRequested) return@execute
                 if (candidate.classrooms().none { it.id == lessonId }) {
                     throw RainFailure(FailureReason.LESSON_ENDED, "monitor_classroom")
                 }
-                if (!alive.get()) return@execute
+                if (!alive.get() || MonitorState.stopRequested) return@execute
                 // Exactly one explicit attempt. Cancellation cannot undo a request already received by the server.
                 val credentials = candidate.enterLesson(lessonId!!)
-                if (!alive.get()) return@execute
+                if (!alive.get() || MonitorState.stopRequested) return@execute
                 main.post {
-                    if (!alive.get()) return@post
+                    if (!alive.get() || MonitorState.stopRequested) return@post
                     Diagnostics.record(this, "monitor_credentials_received")
                     connection = LessonConnection(candidate.client, credentials, observer, clock = SystemClock::elapsedRealtime).also {
                         QuestionRepository.get(this).attach(lessonId, candidate, it,
@@ -128,7 +141,7 @@ class LessonMonitorService : Service() {
             } catch (error: Exception) {
                 val failure = error as? RainFailure
                 main.post {
-                    if (!alive.get()) return@post
+                    if (!alive.get() || MonitorState.stopRequested) return@post
                     Diagnostics.record(this, "monitor_start_failed", mapOf(
                         "error_type" to (failure?.reason?.name ?: "STORAGE"),
                         "protocol_stage" to (failure?.stage ?: "monitor_session")) +
@@ -148,10 +161,20 @@ class LessonMonitorService : Service() {
 
     private val observer = object : LessonObserver {
         override fun state(state: ConnectionState) { main.post {
-            if (!alive.get()) return@post
+            if (!alive.get() || MonitorState.stopRequested) return@post
+            MonitorState.update(MonitorState.current().copy(connection = state,
+                established = MonitorState.current().established || state == ConnectionState.LISTENING))
             when (state) {
                 ConnectionState.CONNECTING -> update("正在连接课堂，等待服务器确认…")
-                ConnectionState.LISTENING -> update("课堂连接已确认，正在监听新题。")
+                ConnectionState.LISTENING -> {
+                    update("课堂连接已确认，正在监听新题。")
+                    if (pendingAutomatic && MonitorState.automaticRequested) {
+                        pendingAutomatic = false
+                        if (requestedRevision != SolverSettings.revision(this@LessonMonitorService) ||
+                            !AutoAnswer.arm(this@LessonMonitorService)) AutoAnswer.block(this@LessonMonitorService,
+                            "课堂已连接，但 API 或后台条件已变化；请检查后重新开启自动答题。")
+                    }
+                }
                 ConnectionState.RETRYING -> update("连接中断，正在重连；中断期间可能漏报。")
                 ConnectionState.OFFLINE -> update("网络不可用或后台联网受限，等待恢复；期间可能漏报。")
                 ConnectionState.DEGRADED -> update("部分课堂消息格式无法识别，可能漏报；请同时留意微信。")
@@ -160,7 +183,7 @@ class LessonMonitorService : Service() {
             }
         } }
         override fun signal(signal: LessonSignal) { main.post {
-            if (!alive.get()) return@post
+            if (!alive.get() || MonitorState.stopRequested) return@post
             when (signal) {
                 is LessonSignal.Question -> {
                     val questionId = QuestionRepository.get(this@LessonMonitorService).capture(signal.reference)
@@ -231,5 +254,8 @@ class LessonMonitorService : Service() {
         const val START = "cn.rainnotify.app.START_LESSON"
         const val STOP = "cn.rainnotify.app.STOP_LESSON"
         const val LESSON_ID = "lesson_id"
+        const val LESSON_NAME = "lesson_name"
+        const val AUTOMATIC = "automatic_mode"
+        const val NOTIFY_ONLY = "cn.rainnotify.app.NOTIFY_ONLY"
     }
 }

@@ -7,62 +7,30 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <queries>
-        <package android:name="com.tencent.mm" />
-        <package android:name="com.moonshot.kimichat" />
-        <package android:name="com.deepseek.chat" />
-        <package android:name="com.larus.nova" />
-    </queries>
+    <queries><package android:name="com.tencent.mm" /></queries>
     <application
         android:allowBackup="false"
-        android:icon="@android:drawable/ic_dialog_info"
+        android:icon="@drawable/ic_rainnotify"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:enableOnBackInvokedCallback="true"
         android:usesCleartextTraffic="false"
-        android:label="雨课堂助手"
+        android:label="@string/app_name"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:supportsRtl="true">
-        <activity android:name=".RainLoginActivity" android:exported="false" />
-        <activity android:name=".question.QuestionActivity" android:exported="false" />
-        <activity android:name=".answer.AnswerActivity" android:exported="false" />
-        <activity android:name=".answer.AutoGateActivity" android:exported="false" android:excludeFromRecents="true" />
-        <activity android:name=".answer.AiSettingsActivity" android:exported="false" />
-        <activity android:name=".SettingsActivity" android:exported="false" />
-        <activity android:name=".NotificationSettingsActivity" android:exported="false" />
-        <activity android:name=".answer.ApiSettingsActivity" android:exported="false" />
-        <activity android:name=".answer.AiReadinessActivity" android:exported="false" />
-        <activity android:name=".answer.AiCompatibilityActivity" android:exported="false" />
-        <provider android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.answerfiles" android:exported="false" android:grantUriPermissions="true">
-            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/answer_file_paths" />
-        </provider>
         <service android:name=".answer.AnswerService" android:exported="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="User-started single question AI assistance with a visible cancellable task, explicit live submission or offline rehearsal, and a bounded runtime under ninety seconds." />
-        </service>
-        <service android:name=".answer.KimiAccessibilityService" android:exported="true"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:label="雨课堂 · AI 作答辅助">
-            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
-            <meta-data android:name="android.accessibilityservice" android:resource="@xml/kimi_accessibility" />
+                android:value="User-enabled current-classroom API answering with a visible cancellable task and a bounded runtime under ninety seconds." />
         </service>
         <service android:name=".monitor.LessonMonitorService"
             android:exported="false" android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="User-started single classroom live question listener with an ongoing status notification and explicit stop action; ends at lesson finish or after four hours." />
         </service>
-        <activity android:name=".MainActivity" android:exported="true">
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <service
-            android:name=".NotificationProbeService"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="User-started classroom notification feasibility session, with a visible status notification and explicit stop action. This probe tests local notification behavior only." />
-        </service>
     </application>
 </manifest>

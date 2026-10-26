@@ -10,11 +10,11 @@ $package = $Matches[1]; $versionCode = $Matches[2]; $versionName = $Matches[3]
 $Serial = Select-RainDevice $tc $Serial
 $sdk = (& $tc.Adb -s $Serial shell getprop ro.build.version.sdk | Out-String).Trim()
 if ($sdk -ne '36') { throw 'This validation baseline requires Android 16 / API 36.' }
-& $tc.Adb -s $Serial install -r $ApkPath
+& $tc.Adb -s $Serial install --no-streaming -r $ApkPath
 if ($LASTEXITCODE) { throw 'Installation failed; check device authorization, signature and version.' }
-$launch = @('-s',$Serial,'shell','am','start','-n',"$package/cn.rainnotify.app.MainActivity")
-if ($OpenLogin) { $launch += @('--ez','open_login_probe','true') }
-if ($OpenQuestions) { $launch += @('--ez','open_questions_probe','true') }
+$launch = @('-s',$Serial,'shell','am','start','-W','-n',"$package/cn.rainnotify.app.MainActivity")
+if ($OpenLogin) { $launch += @('--es','tab','account') }
+if ($OpenQuestions) { $launch += @('--es','tab','question') }
 & $tc.Adb @launch
 if ($LASTEXITCODE) { throw 'Installed app could not be opened.' }
 [pscustomobject]@{package=$package;versionCode=$versionCode;versionName=$versionName} | ConvertTo-Json
