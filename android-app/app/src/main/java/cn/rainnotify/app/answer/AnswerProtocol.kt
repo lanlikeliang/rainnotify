@@ -7,7 +7,7 @@ import org.json.JSONObject
 import org.json.JSONTokener
 import java.security.MessageDigest
 
-class AnswerFailure(val display: String) : Exception(display)
+open class AnswerFailure(val display: String) : Exception(display)
 
 object AnswerProtocol {
     fun validateQuestion(question: QuestionContent, live: Boolean) {

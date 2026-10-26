@@ -40,6 +40,7 @@ class DeepSeekApiTest {
                 server.enqueue(MockResponse().setResponseCode(code).setBody("secret account details"))
                 val failure = assertThrows(AnswerFailure::class.java) { api.solve("fake", "JSON", emptyList(), 1000, RunControl()) }
                 assertFalse(failure.display.contains("secret"))
+                assertEquals(code in listOf(401, 402), failure is ApiUnavailable)
             }
             assertEquals(5, server.requestCount)
         } }

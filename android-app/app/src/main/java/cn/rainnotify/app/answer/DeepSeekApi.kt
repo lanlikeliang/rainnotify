@@ -12,6 +12,8 @@ import java.io.IOException
 import java.util.Base64
 import java.util.concurrent.TimeUnit
 
+class ApiUnavailable(message: String) : AnswerFailure(message)
+
 class ApiImage(val mime: String, val bytes: ByteArray) {
     override fun toString() = "ApiImage(redacted)"
 }
@@ -32,7 +34,10 @@ class DeepSeekApi internal constructor(private val endpoint: HttpUrl = ENDPOINT,
         try {
             return call.execute().use { response ->
                 control.check()
-                if (!response.isSuccessful) throw AnswerFailure(httpMessage(response.code))
+                if (!response.isSuccessful) {
+                    if (response.code in setOf(400, 401, 402, 403, 422)) throw ApiUnavailable(httpMessage(response.code))
+                    throw AnswerFailure(httpMessage(response.code))
+                }
                 val source = response.body?.source() ?: throw AnswerFailure("DeepSeek 未返回内容。")
                 val limit = 128 * 1024L
                 if (source.request(limit + 1)) throw AnswerFailure("DeepSeek 回复超过大小限制，未提交。")
