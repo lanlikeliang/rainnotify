@@ -55,6 +55,36 @@ class ToolchainSmokeTest {
             compose.onNodeWithText("历史演练").assertDoesNotExist()
         }
     }
+    @Test fun modelSelectionPersistsAndCannotReuseAnotherModelsCheck() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val vault = ApiKeyVault(context)
+        try {
+            instrumentation.runOnMainSync {
+                SolverSettings.selectModel(context, DeepSeekModel.FLASH)
+                vault.write("synthetic-key-for-local-test") // No network requests in this test.
+                SolverSettings.markVerified(context)
+            }
+            assertTrue(SolverSettings.apiVerified(context))
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                compose.onNodeWithText("设置").performSemanticsAction(SemanticsActions.OnClick)
+                compose.onNodeWithText("服务商与模型").performSemanticsAction(SemanticsActions.OnClick)
+                compose.onNodeWithText("Flash").performSemanticsAction(SemanticsActions.OnClick)
+                compose.onNodeWithText("V4 Pro").performSemanticsAction(SemanticsActions.OnClick)
+                compose.waitForIdle()
+                assertEquals(DeepSeekModel.PRO, SolverSettings.model(context))
+                assertFalse(SolverSettings.apiVerified(context))
+                scenario.recreate()
+                compose.onNodeWithText("V4 Pro").assertExists()
+                compose.onNodeWithText("当前模型文本自检").assertExists()
+                compose.onNodeWithText("图文自检通过").assertDoesNotExist()
+            }
+            instrumentation.runOnMainSync { SolverSettings.selectModel(context, DeepSeekModel.FLASH) }
+            assertFalse(SolverSettings.apiVerified(context))
+        } finally { instrumentation.runOnMainSync {
+            vault.clear(); SolverSettings.keyChanged(context); SolverSettings.selectModel(context, DeepSeekModel.FLASH)
+        } }
+    }
     @Test fun latestQuestionPageDoesNotExposeOldExercises() {
         ActivityScenario.launch(MainActivity::class.java).use {
             compose.onNodeWithText("题目").performSemanticsAction(SemanticsActions.OnClick)

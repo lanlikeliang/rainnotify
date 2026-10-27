@@ -20,6 +20,7 @@ data class HomeState(
     val apiSaved: Boolean = false, val apiVerified: Boolean = false, val apiBusy: Boolean = false,
     val apiMessage: String = "", val notification: NotificationReadiness? = null,
     val latest: QuestionRecord? = null, val answer: AnswerTask? = null, val message: String = "", val stopping: Boolean = false,
+    val model: DeepSeekModel = DeepSeekModel.FLASH,
 )
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
@@ -77,7 +78,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             ModePolicy.effective(monitor.active && !MonitorState.stopRequested, monitor.established, AutoAnswer.armed),
             ApiKeyVault(app).exists(), SolverSettings.apiVerified(app), apiRun != null, apiMessage,
             NotificationReadiness.read(app), latest, answer, message.ifBlank { AutoAnswer.status.value.orEmpty() },
-            MonitorState.stopRequested && monitor.active)
+            MonitorState.stopRequested && monitor.active, SolverSettings.model(app))
     }
     fun requirements(target: ClassroomMode): List<Requirement> {
         refresh()
@@ -141,6 +142,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
         return true
     }
+    fun selectModel(value: DeepSeekModel) {
+        if (!canChangeApi() || value == SolverSettings.model(app)) return
+        SolverSettings.selectModel(app, value)
+        MonitorState.automaticRequested = false
+        apiMessage = "已切换至 ${value.label}，请完成${value.checkName}后重新开启自动答题。"
+        refresh()
+    }
     fun saveAndCheck(value: String) {
         if (!canChangeApi()) return
         try {
@@ -159,8 +167,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         if (!ApiKeyVault(app).exists()) { apiMessage = "请先保存 API Key。"; refresh(); return }
         SolverSettings.keyChanged(app)
         val revision = SolverSettings.revision(app)
+        val model = SolverSettings.model(app)
         val run = RunControl().also { apiRun = it }
-        apiMessage = "正在校验单图、多图与答案格式…"; refresh()
+        apiMessage = if (model.supportsImages) "正在校验单图、多图与答案格式…" else "正在校验文字题识别与答案格式…"; refresh()
         worker.execute {
             var passed = false
             val directory = File(app.cacheDir, "api-check/" + UUID.randomUUID())
@@ -169,14 +178,15 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 for (type in listOf(1, 2)) {
                     run.check()
                     val taskId = UUID.randomUUID().toString()
-                    val sample = CompatibilitySample.create(taskId, type, File(directory, "$type"))
+                    val sample = if (model.supportsImages) CompatibilitySample.create(taskId, type, File(directory, "$type"))
+                        else CompatibilitySample.createText(taskId, type, File(directory, "$type"))
                     val q = sample.prepared.record.content!!
-                    val reply = DeepSeekApi().solve(key, AnswerProtocol.prompt(q, taskId), SolverSettings.images(sample.prepared), 60_000, run)
+                    val reply = DeepSeekApi().solve(key, AnswerProtocol.prompt(q, taskId), SolverSettings.images(sample.prepared), 60_000, run, model)
                     if (AnswerProtocol.parse(reply, taskId, q) != sample.expected.sorted())
-                        throw AnswerFailure("模型已响应，但图片识别未通过，请重新自检。")
+                        throw AnswerFailure("模型已响应，但${model.checkName}的答案校验未通过，请重新自检。")
                 }
                 run.check(); passed = true
-                "单图、多图与答案格式均通过。"
+                if (model.supportsImages) "单图、多图与答案格式均通过。" else "单选、多选文字题与答案格式均通过；不支持图片。"
             } catch (e: Exception) { (e as? AnswerFailure)?.display ?: "自检未完成，请检查网络后重试。" }
             finally { directory.deleteRecursively() }
             main.post {

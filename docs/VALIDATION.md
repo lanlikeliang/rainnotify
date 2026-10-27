@@ -1,6 +1,6 @@
 # 工具链验证记录
 
-当前 API-only 界面版本的验证范围见 [0.1.1-internal 实现记录](API_ONLY_IMPLEMENTATION.md)。下列为工具链迁移时的历史记录，其中 AI App 与历史演练不再属于正式版产品范围。
+当前 0.1.2-internal 的界面与模型变化见 [模型选择实现记录](MODEL_SELECTION.md)，基础 API-only 界面范围见 [0.1.1-internal 实现记录](API_ONLY_IMPLEMENTATION.md)。实际发布检查以包内 build-receipt.json 与 validation-summary.json 为准。下列为工具链迁移时的历史记录，其中 AI App 与历史演练不再属于正式版产品范围。
 
 本报告用于内部验证，不能替代真实课堂验收。升级日期：2026-10-24 至 2026-10-25。
 

@@ -133,7 +133,7 @@ val Amber = Color(0xFF946009)
     choose: (ClassroomMode) -> Unit, scan: (() -> Unit)? = null) {
     val confirmed = s.login.authenticated || s.monitor.established
     val connecting = s.monitor.active && !s.monitor.established
-    Page("课堂", "当前连接，一目了然") {
+    Page("课堂") {
         Panel {
             InfoRow("当前账户", s.login.displayName ?: if (confirmed) "已授权账户" else "未授权",
                 if (confirmed) "已授权" else if (s.login.busy) "验证中" else "去授权", "account", account)
@@ -141,8 +141,8 @@ val Amber = Color(0xFF946009)
             InfoRow("当前课堂", s.monitor.lessonName.takeIf { s.monitor.active } ?: s.lesson?.classroomName ?: "未选择",
                 if (s.monitor.connection == ConnectionState.LISTENING) "已连接" else "选择课堂", "class", classroom)
             HorizontalDivider(color = CanvasColor)
-            InfoRow("当前模型", if (s.apiSaved) "DeepSeek · Flash" else "未配置",
-                if (s.apiVerified) "图文自检通过" else if (s.apiSaved) "待自检" else "去配置", "model", api)
+            InfoRow("当前模型", if (s.apiSaved) s.model.displayName else "未配置",
+                if (s.apiVerified) s.model.checkName + "通过" else if (s.apiSaved) "待自检" else "去配置", "model", api)
         }
         Surface(color = Color(0xFFE5F4F0), shape = RoundedCornerShape(24.dp)) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 24.dp), horizontalAlignment = Alignment.CenterHorizontally,
@@ -169,14 +169,15 @@ val Amber = Color(0xFF946009)
         else Text("最新题目与处理结果，请到「题目」查看。", color = Muted, fontSize = 14.sp)
         if (s.message.isNotBlank()) Text(s.message, color = Muted, fontSize = 14.sp)
         if ((s.monitor.active && s.monitor.connection != ConnectionState.LISTENING) ||
-            (!s.monitor.active && s.monitor.message != MonitorUiState().message))
+            (!s.monitor.active && s.monitor.message !in setOf(MonitorUiState().message,
+                "监听已关闭。", "已停止课堂监听。", "监听已停止，需要时请手动重新开始。")))
             Text(s.monitor.message, color = Amber, fontSize = 14.sp)
         if (scan != null) OutlinedButton(onClick = scan) { Text("前往微信完成课堂扫码") }
     }
 }
 
 @Composable fun QuestionPage(record: QuestionRecord?, answer: AnswerTask?, mode: ClassroomMode, imageFile: (String, Int) -> File?) {
-    Page("题目", "本次课堂 · 最新一题") {
+    Page("题目") {
         if (record == null) {
             Panel { Text("等待课堂发题", fontSize = 20.sp, fontWeight = FontWeight.SemiBold);Text("在课堂页开启发题通知或自动答题后，最新题目会显示在这里。", color = Muted) }
         } else {
@@ -200,7 +201,7 @@ val Amber = Color(0xFF946009)
             if (ownAnswer?.answer?.isNotEmpty() == true) Panel {
                 Text("AI 答案", fontWeight = FontWeight.SemiBold)
                 Text(ownAnswer.answer.joinToString(if (q?.type == 4) "\n" else "、"), fontSize = 22.sp, lineHeight = 32.sp)
-                Text("DeepSeek · Flash", color = Muted, fontSize = 12.sp)
+                Text(ownAnswer.model.displayName, color = Muted, fontSize = 12.sp)
             }
             Panel {
                 Text("处理状态", fontWeight = FontWeight.SemiBold)

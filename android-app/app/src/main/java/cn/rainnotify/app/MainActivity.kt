@@ -97,10 +97,10 @@ class MainActivity : ComponentActivity() {
                         Panel { InfoRow("雨课堂账号",s.login.displayName ?: if(s.login.authenticated) "已授权" else "未授权",kind="account") { page=AppPage.ACCOUNT } }
                         Text("AI 服务",fontWeight=FontWeight.SemiBold)
                         Panel {
-                            InfoRow("服务商与模型","DeepSeek · Flash", "支持图片", "model") { page=AppPage.API }
+                            InfoRow("服务商与模型",s.model.displayName, s.model.capability, "model") { page=AppPage.API }
                             HorizontalDivider()
                             InfoRow("API Key",if(s.apiSaved) "已加密保存" else "未配置") { page=AppPage.API }
-                            Text(if(s.apiVerified) "图文自检通过" else "当前模型待自检",color=if(s.apiVerified) Teal else Muted)
+                            Text(if(s.apiVerified) s.model.checkName+"通过" else "当前模型待自检",color=if(s.apiVerified) Teal else Muted)
                             TextButton(onClick={page=AppPage.API}) { Text(if(s.apiVerified) "查看 / 重新自检" else "配置并自检") }
                         }
                         Text("运行保障",fontWeight=FontWeight.SemiBold)
@@ -138,7 +138,7 @@ class MainActivity : ComponentActivity() {
                             if(s.monitor.active) Text("更换课堂前，请先将课堂模式切到关闭。",color=Muted)
                         }
                     }
-                    AppPage.API -> ApiPage(s,::back,{value->home.saveAndCheck(value)},{home.verifyApi()},{home.cancelApiCheck()},{deleteConfirmation=true})
+                    AppPage.API -> ApiPage(s,::back,{value->home.saveAndCheck(value)},{home.verifyApi()},{home.cancelApiCheck()},{deleteConfirmation=true},{home.selectModel(it)})
                     AppPage.NOTIFICATIONS -> Page("通知与声音","新题和作答结果使用系统通知",::back) {
                         Panel {
                             InfoRow("通知权限",if(s.notification?.canPost==true) "已允许" else "待设置") {
@@ -213,18 +213,28 @@ class MainActivity : ComponentActivity() {
     companion object { const val TAB="tab" }
 }
 
-@Composable private fun ApiPage(s:HomeState, back:()->Unit, save:(String)->Unit, verify:()->Unit, cancel:()->Unit, delete:()->Unit) {
+@Composable private fun ApiPage(s:HomeState, back:()->Unit, save:(String)->Unit, verify:()->Unit, cancel:()->Unit, delete:()->Unit, select:(DeepSeekModel)->Unit) {
     var input by remember { mutableStateOf("") } // Never save a key in Activity/Compose saved state.
     var editing by remember { mutableStateOf(false) }
+    var selecting by remember { mutableStateOf(false) }
+    if(selecting) AlertDialog(onDismissRequest={selecting=false},title={Text("选择模型")},text={
+        Column {
+            DeepSeekModel.entries.forEach { model ->
+                InfoRow(model.label,model.capability,if(model==s.model) "已选择" else "") { selecting=false;select(model) }
+            }
+            Text("切换后需重新自检。Pro 遇到图片会停止本题并提示切换 Flash。",color=Muted,fontSize=13.sp)
+        }
+    },confirmButton={TextButton(onClick={selecting=false}){Text("取消")}})
     Page("AI 服务","当前使用 DeepSeek 官方 API",back) {
         Panel {
             InfoRow("服务商","DeepSeek",kind="model")
-            InfoRow("当前模型","Flash · 支持图片")
+            InfoRow("当前模型",s.model.label,s.model.capability,"model",action=if(s.apiBusy) null else ({selecting=true}))
+            if(!s.model.supportsImages) Text("Pro 仅处理纯文字题。含图题不会发送或提交，请切换 Flash 并通过图文自检。",color=Amber,fontSize=13.sp)
             HorizontalDivider()
             if(!s.apiSaved || editing) {
                 OutlinedTextField(value=input,onValueChange={input=it},label={Text("API Key")},singleLine=true,
                     visualTransformation=PasswordVisualTransformation(),modifier=Modifier.fillMaxWidth(),enabled=!s.apiBusy)
-                Button(onClick={val value=input;input="";editing=false;save(value)},enabled=input.isNotBlank()&&!s.apiBusy) { Text("保存并进行图文自检") }
+                Button(onClick={val value=input;input="";editing=false;save(value)},enabled=input.isNotBlank()&&!s.apiBusy) { Text("保存并进行"+s.model.checkName) }
             } else {
                 Text("密钥已加密保存，不回显。",color=Muted)
                 TextButton(onClick={editing=true},enabled=!s.apiBusy) { Text("更换密钥") }
@@ -232,15 +242,15 @@ class MainActivity : ComponentActivity() {
             Text("题干和原图会发送到 api.deepseek.com，按服务商规则计费；雨课堂登录凭据不会发给模型。",color=Muted,fontSize=13.sp)
         }
         Panel {
-            Text("当前模型图文自检",fontWeight=FontWeight.SemiBold)
+            Text("当前模型"+s.model.checkName,fontWeight=FontWeight.SemiBold)
             if(s.apiBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
-            Text(if(s.apiVerified) "图文自检通过" else if(s.apiBusy) "正在自检…" else "尚未通过自检",color=if(s.apiVerified) Teal else Muted)
+            Text(if(s.apiVerified) s.model.checkName+"通过" else if(s.apiBusy) "正在自检…" else "尚未通过自检",color=if(s.apiVerified) Teal else Muted)
             if(s.apiMessage.isNotBlank()) Text(s.apiMessage,color=Muted)
             if(s.apiBusy) TextButton(onClick=cancel){Text("停止自检")}
-            else OutlinedButton(onClick=verify,enabled=s.apiSaved){Text(if(s.apiVerified) "重新自检" else "开始图文自检")}
-            Text("仅验证当前 API 的单图、多图和答案格式，不向课堂提交。自检时请保持本页可见。",fontSize=13.sp,color=Muted)
+            else OutlinedButton(onClick=verify,enabled=s.apiSaved){Text(if(s.apiVerified) "重新自检" else "开始"+s.model.checkName)}
+            Text((if(s.model.supportsImages) "验证单图、多图和答案格式。" else "验证单选、多选文字题和答案格式，不验证图片。")+"不向课堂提交，自检时请保持本页可见。",fontSize=13.sp,color=Muted)
         }
-        Text("更换密钥或重新自检会关闭自动答题；完成后请返回课堂主动开启。",color=Muted,fontSize=13.sp)
+        Text("切换模型、更换密钥或重新自检会关闭自动答题；完成后请返回课堂主动开启。",color=Muted,fontSize=13.sp)
         if(s.apiSaved) TextButton(onClick=delete,enabled=!s.apiBusy){Text("删除本机密钥")}
     }
 }
