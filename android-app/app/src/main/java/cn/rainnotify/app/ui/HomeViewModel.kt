@@ -53,6 +53,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         boundLogin = source
         observe(source) {
             login = it
+            if (it.sessionExpired && MonitorState.current().active) {
+                stop()
+                message = "雨课堂授权已失效，监听与自动答题已关闭，请重新授权。"
+            }
             if (!it.busy && it.authenticated && !MonitorState.current().active) {
                 selected = it.lessons.firstOrNull { candidate -> candidate.id == selected?.id }
                     ?: it.lessons.singleOrNull()

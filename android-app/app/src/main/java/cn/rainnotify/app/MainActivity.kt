@@ -121,7 +121,7 @@ class MainActivity : ComponentActivity() {
                                 Button(onClick={login.saveQr()},enabled=!s.login.qrSaved) { Text(if(s.login.qrSaved) "二维码已保存" else "保存二维码到相册") }
                                 OutlinedButton(onClick={openWeChat()}) { Text("打开微信扫码授权") }
                             }
-                            if(!s.login.authenticated && !s.login.busy) Button(onClick={login.startLogin()}) { Text("生成微信授权二维码") }
+                            if(!s.login.authenticated && !s.login.busy) Button(onClick={home.beforeLogout();login.startLogin()}) { Text("生成微信授权二维码") }
                             if(s.login.busy) TextButton(onClick={login.cancelLogin()}) { Text("取消本次操作") }
                             if(s.login.authenticated) {
                                 OutlinedButton(onClick={login.refresh()},enabled=!s.login.busy) { Text("刷新当前课堂") }
