@@ -20,13 +20,53 @@ class DeepSeekApiTest {
             assertEquals("Bearer fake-test-key", request.getHeader("Authorization"))
             assertNull(request.getHeader("Cookie"))
             val body = JSONObject(request.body.readUtf8())
-            assertEquals(DeepSeekApi.MODEL, body.getString("model"))
+            assertEquals(DeepSeekModel.FLASH.id, body.getString("model"))
             assertEquals("disabled", body.getJSONObject("thinking").getString("type"))
             assertEquals("json_object", body.getJSONObject("response_format").getString("type"))
             val blocks = body.getJSONArray("messages").getJSONObject(0).getJSONArray("content")
             assertEquals(3, blocks.length())
             assertEquals("data:image/png;base64,AQI=", blocks.getJSONObject(1).getJSONObject("image_url").getString("url"))
             assertEquals("data:image/jpeg;base64,AwQ=", blocks.getJSONObject(2).getJSONObject("image_url").getString("url"))
+        }
+    }
+    @Test fun proUsesSelectedModelAndPlainTextContent() {
+        MockWebServer().use { server ->
+            server.enqueue(MockResponse().setBody(response("{}"))); server.start()
+            assertEquals("{}", DeepSeekApi(server.url("/")).solve("fake", "JSON text question", emptyList(), 2000, RunControl(), DeepSeekModel.PRO))
+            val body = JSONObject(server.takeRequest().body.readUtf8())
+            assertEquals("deepseek-v4-pro", body.getString("model"))
+            assertEquals("JSON text question", body.getJSONArray("messages").getJSONObject(0).getString("content"))
+            assertEquals("disabled", body.getJSONObject("thinking").getString("type"))
+        }
+    }
+    @Test fun proRejectsImagesBeforeSendingOrDroppingThem() {
+        MockWebServer().use { server ->
+            server.start()
+            val failure = assertThrows(AnswerFailure::class.java) {
+                DeepSeekApi(server.url("/")).solve("fake", "JSON", listOf(ApiImage("image/png", byteArrayOf(1))), 2000, RunControl(), DeepSeekModel.PRO)
+            }
+            assertTrue(failure.display.contains("切换 Flash"))
+            assertEquals(0, server.requestCount)
+            assertFalse(failure is ApiUnavailable) // An image question does not invalidate a text-capable model's key.
+        }
+    }
+    @Test fun modelVerificationAndHistoricalAnswerStayBoundToTheModel() {
+        assertNotEquals(DeepSeekModel.FLASH.verificationKey, DeepSeekModel.PRO.verificationKey)
+        assertEquals("https://api.deepseek.com/chat/completions:deepseek-flash:v2", DeepSeekModel.FLASH.verificationKey)
+        val task = AnswerTask("task", "q", true, AnswerPhase.SOLVING, "", model = DeepSeekModel.PRO)
+        assertEquals(DeepSeekModel.PRO, task.changed(AnswerPhase.SUBMITTED, "", listOf("A")).model)
+    }
+    @Test fun textChecksUseActualTextQuestionsWithNoHiddenImageDependency() {
+        for (type in listOf(1, 2)) {
+            val id = java.util.UUID.randomUUID().toString()
+            val sample = CompatibilitySample.createText(id, type, java.io.File("unused-test-directory"))
+            val q = sample.prepared.record.content!!
+            assertTrue(q.assets.isEmpty()); assertTrue(sample.prepared.images.isEmpty())
+            assertEquals(sample.expected.sorted(), q.options.filter { it.html == "本次目标" }.map { it.label })
+            val prompt = AnswerProtocol.prompt(q, id)
+            assertTrue(prompt.contains("纯文字")); assertFalse(prompt.contains("必须结合所有附图"))
+            val reply = JSONObject().put("task", id).put("answer", org.json.JSONArray(sample.expected)).put("unable", false).toString()
+            assertEquals(sample.expected.sorted(), AnswerProtocol.parse(reply, id, q))
         }
     }
     @Test fun redirectsNeverForwardKeyToAnotherHostAndErrorsDontEchoServerBody() {

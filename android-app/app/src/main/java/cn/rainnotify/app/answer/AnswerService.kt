@@ -43,8 +43,9 @@ class AnswerService : Service() {
         } ?: run { stopSelf(); return START_NOT_STICKY }
         busy = true; autoTicket = automatic.id
         val revision = SolverSettings.revision(this)
+        val model = SolverSettings.model(this)
         val run = RunControl().also { control = it }
-        val task = AnswerTask(UUID.randomUUID().toString(), id!!, true, AnswerPhase.PREPARING, "正在获取本题图文…")
+        val task = AnswerTask(UUID.randomUUID().toString(), id!!, true, AnswerPhase.PREPARING, "正在获取本题图文…", model = model)
         current = task
         wake = getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
             "rainnotify:api-answer").apply { acquire(95_000) }
@@ -61,6 +62,8 @@ class AnswerService : Service() {
                 val prepared = repo.prepare(id, directory)
                 if (prepared.record.offline) throw AnswerFailure("离线题目不能提交到课堂。")
                 if (prepared.record.reference.groupWork) throw AnswerFailure("分组题需在雨课堂中手动完成，未自动提交。")
+                val content = prepared.record.content ?: throw AnswerFailure("题目内容尚未完整获取，未提交。")
+                model.requireSupportedImages(content.assets.isNotEmpty() || prepared.images.isNotEmpty())
                 val active = repo.activeBinding(id) ?: throw AnswerFailure("本题不属于当前监听会话。")
                 val ref = prepared.record.reference
                 val gateway = object : AnswerGateway {
@@ -70,16 +73,16 @@ class AnswerService : Service() {
                         catch (e: Exception) { throw (e.cause as? AnswerFailure ?: AnswerFailure("无法核对剩余时间，未提交。")) }
                     override fun refresh() = active.api.answerableQuestion(ref).let { it.content to it.alreadyAnswered }
                     override fun submit(answer: List<String>, timeoutMs: Long) =
-                        active.api.submitAnswer(ref, prepared.record.content!!, answer, timeoutMs)
+                        active.api.submitAnswer(ref, content, answer, timeoutMs)
                 }
                 val key = AnswerProtocol.sha256(active.accountScope + ":" + ref.lessonId + ":" + ref.presentationId + ":" + ref.problemId)
                 AnswerEngine(SystemClock::elapsedRealtime, SubmissionJournal(File(noBackupFilesDir, "submissions-v1")))
-                    .run(task.id, prepared.record.content!!, automatic.received, run, gateway, key,
+                    .run(task.id, content, automatic.received, run, gateway, key,
                         solve = { timeout ->
                             if (SolverSettings.revision(this) != revision) throw AnswerFailure("API 配置已改变，未提交。")
                             try {
-                                DeepSeekApi().solve(ApiKeyVault(this).read(), AnswerProtocol.prompt(prepared.record.content!!, task.id),
-                                    SolverSettings.images(prepared), timeout, run)
+                                DeepSeekApi().solve(ApiKeyVault(this).read(), AnswerProtocol.prompt(content, task.id),
+                                    SolverSettings.images(prepared), timeout, run, model)
                             } catch (e: ApiUnavailable) {
                                 // AnswerEngine maps solver failures to a result; downgrade before that boundary.
                                 main.post {
