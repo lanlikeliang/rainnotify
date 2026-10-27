@@ -177,10 +177,16 @@ class RainApiTest {
 
     @Test fun acceptsBinaryLoginGrantFromWebSocket() {
         MockWebServer().use { server ->
+            val serverClosed = CountDownLatch(1)
+            val clientClosed = CountDownLatch(1)
             server.enqueue(MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     webSocket.send("""{"UserID":42,"Auth":"binary-fixture"}""".encodeUtf8())
                 }
+                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                    webSocket.close(code, reason)
+                }
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { serverClosed.countDown() }
             }))
             server.start()
             val received = CountDownLatch(1)
@@ -193,10 +199,14 @@ class RainApiTest {
                         received.countDown()
                         webSocket.close(1000, null)
                     }
+                    override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { clientClosed.countDown() }
                 })
             try {
                 assertTrue(received.await(5, TimeUnit.SECONDS))
                 assertTrue(grant is LoginMessage.Grant)
+                // Finish both halves of the handshake before MockWebServer shuts down its task queue.
+                assertTrue(clientClosed.await(5, TimeUnit.SECONDS))
+                assertTrue(serverClosed.await(5, TimeUnit.SECONDS))
             } finally {
                 socket.cancel()
                 client.dispatcher.executorService.shutdown()
