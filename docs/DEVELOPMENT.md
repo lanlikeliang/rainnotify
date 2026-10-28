@@ -39,7 +39,7 @@ Linux/macOS 从 `android-app` 调用 `./gradlew`，Windows 也可直接调用 `g
 
 ## Git 与 CI
 
-私有仓库采用短分支与 PR。每个升级步骤独立提交；提交和 PR 执行 Linux 检查。发布前手动执行 Windows release readiness。CI 仅用合成数据，运行 Python 测试、JVM 测试、Lint 和 Debug/未签名 Release 构建；设备测试在已授权真机执行。禁止把签名密钥、登录票据、真实课堂导出或 API Key 上传至仓库或 CI。
+仓库采用短分支与 PR，发布版本合并至 main，并以版本标签创建 GitHub Release。自 v0.1.3 起按用户要求公开源码和正式签名 APK；改变可见性前检查可达历史及当前源码。每个升级步骤独立提交；提交和 PR 执行 Linux 检查。发布前手动执行 Windows release readiness。CI 仅用合成数据，运行 Python 测试、JVM 测试、Lint 和 Debug/未签名 Release 构建；设备测试在已授权真机执行。禁止把签名密钥、登录票据、真实课堂导出或 API Key 上传至仓库或 CI。
 
 `tools/lint-reviewed.json` 记录逐项审核的旧警告，新增警告或任何 Error/Fatal 均失败。现有 UI 文案拼接和 KTX 建议留待页面迁移；静态 Context 警告已核对只保存 applicationContext；二维码相册 URI 的同步持久化保留原行为。版本提示与固定编译基线分开管理。权限、生命周期、导出组件、发布行为类的新问题必须先修复。
 
