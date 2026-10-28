@@ -4,6 +4,7 @@ enum class ClassroomMode(val label: String) { OFF("关闭"), NOTIFY("发题通�
 enum class Requirement(val label: String) {
     ACCOUNT("请先授权雨课堂账号"), CLASSROOM("请选择当前课堂"),
     NOTIFICATIONS("请允许通知和题目提醒渠道"), BACKGROUND("本 App 后台运行受限"),
+    CLASSROOM_SCAN("请先用微信扫描教师课堂二维码，再返回连接"),
     API_KEY("请配置当前 API Key"), API_CHECK("请完成当前模型自检")
 }
 data class ModeRequirements(val account: Boolean, val classroom: Boolean, val notifications: Boolean,

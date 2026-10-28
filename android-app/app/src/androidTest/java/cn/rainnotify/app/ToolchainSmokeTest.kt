@@ -55,6 +55,42 @@ class ToolchainSmokeTest {
             compose.onNodeWithText("历史演练").assertDoesNotExist()
         }
     }
+    @Test fun accountClassroomAndModelReturnToTheirEntryPage() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            for (entry in listOf("当前账户","当前课堂","当前模型")) {
+                compose.onNodeWithText(entry).performSemanticsAction(SemanticsActions.OnClick)
+                compose.onNodeWithText("‹").performSemanticsAction(SemanticsActions.OnClick)
+                compose.onNodeWithTag("mode-selector").assertExists()
+            }
+            compose.onNodeWithText("设置").performSemanticsAction(SemanticsActions.OnClick)
+            compose.onNodeWithText("服务商与模型").performSemanticsAction(SemanticsActions.OnClick)
+            compose.onNodeWithText("‹").performSemanticsAction(SemanticsActions.OnClick)
+            compose.onNodeWithText("运行保障").assertExists()
+        }
+    }
+    @Test fun verificationCannotSilentlyDowngradeAnAutomaticRequest() {
+        val instrumentation=InstrumentationRegistry.getInstrumentation()
+        val context=instrumentation.targetContext
+        try {
+            instrumentation.runOnMainSync {
+                ApiKeyVault(context).write("synthetic-key-for-local-test")
+                SolverSettings.selectModel(context,DeepSeekModel.FLASH)
+                SolverSettings.markVerified(context)
+            }
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { MonitorState.automaticRequested=true }
+                compose.onNodeWithText("当前模型").performSemanticsAction(SemanticsActions.OnClick)
+                compose.onNodeWithText("重新自检").performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+                compose.waitForIdle()
+                assertTrue(MonitorState.automaticRequested)
+                assertTrue(SolverSettings.apiVerified(context))
+                compose.onNodeWithText("自动答题运行中，当前模式保持不变。请先在课堂切回发题通知，再进行自检或修改 API。").assertExists()
+            }
+        } finally { instrumentation.runOnMainSync {
+            MonitorState.automaticRequested=false;ApiKeyVault(context).clear();SolverSettings.keyChanged(context)
+        } }
+    }
+
     @Test fun modelSelectionPersistsAndCannotReuseAnotherModelsCheck() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -85,10 +121,10 @@ class ToolchainSmokeTest {
             vault.clear(); SolverSettings.keyChanged(context); SolverSettings.selectModel(context, DeepSeekModel.FLASH)
         } }
     }
-    @Test fun latestQuestionPageDoesNotExposeOldExercises() {
+    @Test fun classroomArchiveDoesNotExposeDeveloperExercises() {
         ActivityScenario.launch(MainActivity::class.java).use {
             compose.onNodeWithText("题目").performSemanticsAction(SemanticsActions.OnClick)
-            compose.onNodeWithText("等待课堂发题").assertExists()
+            compose.onNodeWithText("暂无课堂题目").assertExists()
             compose.onNodeWithText("导入题目").assertDoesNotExist()
             compose.onNodeWithText("仅演练本题（不提交）").assertDoesNotExist()
         }

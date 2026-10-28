@@ -21,6 +21,8 @@ data class HomeState(
     val apiMessage: String = "", val notification: NotificationReadiness? = null,
     val latest: QuestionRecord? = null, val answer: AnswerTask? = null, val message: String = "", val stopping: Boolean = false,
     val model: DeepSeekModel = DeepSeekModel.FLASH,
+    val records: List<QuestionRecord> = emptyList(), val answers: Map<String, AnswerTask> = emptyMap(),
+    val scannedLesson: String? = null, val exportBusy: Boolean = false,
 )
 
 class HomeViewModel(application: Application) : AndroidViewModel(application) {
@@ -31,6 +33,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val removers = mutableListOf<() -> Unit>()
     private var login = LoginUiState()
     private var selected: LessonSummary? = null
+    private var scannedLesson: String? = null
+    private var exporting = false
     private var message = ""
     private var apiMessage = ""
     private val worker = Executors.newSingleThreadExecutor()
@@ -42,6 +46,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         observe(MonitorState.state) { refresh() }
         observe(AutoAnswer.status) { refresh() }
         observe(repository.latest) { refresh() }
+        observe(repository.records) { refresh() }
+        observe(repository.answers) { refresh() }
         observe(AnswerState.task) { refresh() }
     }
     private fun <T> observe(source: LiveData<T>, block: (T) -> Unit) {
@@ -67,25 +73,33 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun selectLesson(lesson: LessonSummary) {
         if (MonitorState.current().active) { explain("请先切到关闭，再更换课堂。"); return }
+        if (selected?.id != lesson.id) scannedLesson = null
         selected = lesson; message = ""; refresh()
     }
     fun refresh() {
         if (disposed) return
         val monitor = MonitorState.current()
-        val latest = repository.latest.value
+        val records = repository.records.value.orEmpty().filter { !it.offline }
+        val lessonId = monitor.lessonId.takeIf { monitor.active } ?: selected?.id
+        val latest = (repository.latest.value?.takeIf { lessonId == null || it.reference.lessonId == lessonId }
+            ?: records.firstOrNull { lessonId == null || it.reference.lessonId == lessonId })
         val answer = AnswerState.task.value?.takeIf { ModePolicy.answerBelongsToLatest(latest?.id, it.questionId) }
+            ?: repository.answers.value?.get(latest?.id)
         mutable.value = HomeState(login, selected, monitor,
             ModePolicy.effective(monitor.active && !MonitorState.stopRequested, monitor.established, AutoAnswer.armed),
             ApiKeyVault(app).exists(), SolverSettings.apiVerified(app), apiRun != null, apiMessage,
             NotificationReadiness.read(app), latest, answer, message.ifBlank { AutoAnswer.status.value.orEmpty() },
-            MonitorState.stopRequested && monitor.active, SolverSettings.model(app))
+            MonitorState.stopRequested && monitor.active, SolverSettings.model(app), records, repository.answers.value.orEmpty(), scannedLesson, exporting)
     }
     fun requirements(target: ClassroomMode): List<Requirement> {
         refresh()
         val s = mutable.value!!
-        return ModePolicy.missing(target, ModeRequirements(s.login.authenticated || s.monitor.established,
-            s.lesson != null || s.monitor.established, s.notification?.canPost == true,
-            s.notification?.backgroundRestricted == true, s.apiSaved, s.apiVerified))
+        return ModePolicy.missing(target, ModeRequirements(s.login.authenticated || (s.monitor.active && s.monitor.established),
+            s.lesson != null || (s.monitor.active && s.monitor.established), s.notification?.canPost == true,
+            s.notification?.backgroundRestricted == true, s.apiSaved, s.apiVerified)).toMutableList().apply {
+                if (target != ClassroomMode.OFF && s.login.authenticated && s.lesson != null &&
+                    !s.monitor.active && scannedLesson != s.lesson.id) add(Requirement.CLASSROOM_SCAN)
+            }
     }
     fun request(target: ClassroomMode) {
         message = ""
@@ -115,10 +129,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         MonitorState.stopRequested = false
         MonitorState.automaticRequested = target == ClassroomMode.AUTO
         MonitorState.update(MonitorUiState(active = true, message = "正在准备课堂连接…",
-            lessonId = lesson.id, lessonName = lesson.classroomName))
+            lessonId = lesson.id, lessonName = lesson.displayName))
         try {
             app.startForegroundService(Intent(app, LessonMonitorService::class.java).setAction(LessonMonitorService.START)
-                .putExtra(LessonMonitorService.LESSON_ID, lesson.id).putExtra(LessonMonitorService.LESSON_NAME, lesson.classroomName)
+                .putExtra(LessonMonitorService.LESSON_ID, lesson.id).putExtra(LessonMonitorService.LESSON_NAME, lesson.displayName)
                 .putExtra(LessonMonitorService.AUTOMATIC, target == ClassroomMode.AUTO))
         } catch (_: RuntimeException) {
             MonitorState.update(MonitorUiState(message = "系统未允许启动，请检查后台运行设置。"))
@@ -134,9 +148,26 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
         message = ""; refresh()
     }
-    fun beforeLogout() { stop(); selected = null; repository.hideLatest(); message = "" }
+    fun beforeLogout() { stop(); selected = null; scannedLesson = null; repository.hideLatest(); message = "" }
     fun explain(value: String) { message = value; refresh() }
+    fun confirmScanned() { scannedLesson = selected?.id; refresh() }
+    fun exportClassroom(uri: android.net.Uri, key: String) {
+        if (exporting) return
+        exporting = true; refresh()
+        worker.execute {
+            val result = try {
+                app.contentResolver.openOutputStream(uri)?.use { repository.exportStudy(it, key) }
+                    ?: error("no output")
+                "课堂复习笔记已导出，可离线查看或打印。"
+            } catch (_: Exception) { "导出未完成，请检查可用空间和保存位置后重试。" }
+            main.post { exporting = false; message = result; refresh() }
+        }
+    }
     private fun canChangeApi(): Boolean {
+        if (AutoAnswer.armed || MonitorState.automaticRequested) {
+            apiMessage = "自动答题运行中，当前模式保持不变。请先在课堂切回发题通知，再进行自检或修改 API。"
+            refresh(); return false
+        }
         if (apiRun != null || AnswerState.task.value?.active == true || AutoAnswer.ticket != null) {
             apiMessage = "请先结束当前自检或作答任务，再修改 API。"; refresh(); return false
         }

@@ -27,13 +27,13 @@ Linux/macOS 从 `android-app` 调用 `./gradlew`，Windows 也可直接调用 `g
 
 构建脚本失败返回非零结果，成功输出 APK 路径及 `.build.json` 收据，记录提交号、工作区状态、校验项和 APK 摘要。发布只接受当前干净提交构建的 Release，且必须运行 Lint 和对应单元测试。
 
-设备测试使用独立的 `cn.rainnotify.app.smoke` 包，连接并解锁一台 Android 16 手机，允许 USB 调试与测试组件安装。`-DeviceTests` 构建测试包并通过 `run_device_tests.ps1` 普通安装运行，不使用会自动卸载目标 App 的测试清理流程，不清空预览版或正式版数据。Compose 测试覆盖三档互斥/默认关闭、缺项不启动、无需登录打开设置、最新题空态无演练入口；不需要账号或 API Key，不进入真实课堂。模拟服务器覆盖五题型的获取、求解、格式校验、提交及防重复提交。只编译测试包时，用 Wrapper 的 `:app:assembleSmoke :app:assembleSmokeAndroidTest`，不要传 `-DeviceTests`。
+设备测试使用独立的 `cn.rainnotify.app.smoke` 包，连接并解锁一台 Android 16 手机，允许 USB 调试与测试组件安装。`-DeviceTests` 构建测试包并通过 `run_device_tests.ps1` 普通安装运行，不使用会自动卸载目标 App 的测试清理流程，不清空预览版或正式版数据。Compose 测试覆盖三档互斥/默认关闭、缺项不启动、无需登录打开设置、课堂归档空态无演练入口、账户/课堂/模型的来源返回、自检不改变已请求的自动模式；不需要账号或 API Key，不进入真实课堂。模拟服务器覆盖五题型的获取、求解、格式校验、提交及防重复提交。只编译测试包时，用 Wrapper 的 `:app:assembleSmoke :app:assembleSmokeAndroidTest`，不要传 `-DeviceTests`。
 
 ## 模块与边界
 
 设备 UI 检查在实际 Activity 上定位并激活控件，验证导航、提示及开关状态；使用控件回调避免要求小米额外开放全机触控注入权限。实际触摸命中区域仍需人工检查。每个测试先由测试框架将独立包放到前台，避免厂商后台启动限制。
 
-保留单个 `app` 模块：`ui` 的 Compose 组件渲染 `HomeViewModel` 汇总状态，`auth` 管理登录与雨课堂请求，`monitor` 管理课堂连接与事件，`question` 管理题目与本地原图，`answer` 管理 API 求解及提交。原归档格式与合成测试保留在内部，产品无导入/导出/演练入口；AI App 适配和无障碍服务已删除。`src/debug` 仅保留只读题目比较诊断入口，不进入 Release。诊断不得含账号凭据、题目原文或答案；Release 通过设置 → 关于与帮助导出诊断，不能依赖 `run-as`。
+保留单个 `app` 模块：`ui` 的 Compose 组件渲染 `HomeViewModel` 汇总状态，`auth` 管理登录与雨课堂请求，`monitor` 管理课堂连接与事件，`question` 管理题目与本地原图，`answer` 管理 API 求解及提交。旧 ZIP 归档格式与合成测试保留在内部，产品没有题目导入或演练入口。按用户 2026-10-28 的新要求，题目页提供课堂归档和离线 HTML 复习导出，取代之前不显示历史题的范围。AI App 适配和无障碍服务已删除。`src/debug` 仅保留只读题目比较诊断入口，不进入 Release。诊断不得含账号凭据、题目原文或答案；Release 通过设置 → 关于与帮助导出诊断，不能依赖 `run-as`。
 
 当前页面使用 Compose 1.9.5、Material 3 1.4.0、Activity Compose 1.11.0，Kotlin Compose 插件与 Kotlin 同版本 2.3.21。沿用 AGP/JDK/API 36 基线，新增依赖按官方 Maven 摘要审核。`ui/AppUi.kt` 提供首次使用、自动档和大字体 Preview，可在 IDE 中查看；Preview 不证明权限、后台联网和提交行为。真实课堂提交、多品牌、长时休眠属于产品验收，不由构建通过替代。
 

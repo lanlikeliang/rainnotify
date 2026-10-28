@@ -9,3 +9,5 @@
 - 本项目为独立辅助工具，并非雨课堂官方应用。
 - 发布资源：`android-app/app/src/main/res/drawable-nodpi/ic_rainnotify_art.png`。
 - SHA-256：`5ddcb7497b62ff7719e749e8a59d5ca7ba30ded29b535b699e548bc579c4735a`。仓库审查仅对这个确切路径与摘要放行，其他二进制限制不变。
+
+0.1.3-internal 使用 `mipmap-anydpi/ic_launcher.xml` 的自适应图标层：纯黑背景，原图前景四周 18dp 边距（108dp 画布内居中 72dp）。PNG 摘要未改变；支持桌面统一裁切。实际厂商桌面比例仍需设备验证。

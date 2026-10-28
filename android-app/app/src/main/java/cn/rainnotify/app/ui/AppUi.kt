@@ -130,16 +130,16 @@ val Amber = Color(0xFF946009)
 }
 
 @Composable fun ClassroomPage(s: HomeState, account: () -> Unit, classroom: () -> Unit, api: () -> Unit,
-    choose: (ClassroomMode) -> Unit, scan: (() -> Unit)? = null) {
-    val confirmed = s.login.authenticated || s.monitor.established
+    choose: (ClassroomMode) -> Unit, latest: () -> Unit = {}) {
+    val confirmed = s.login.authenticated || (s.monitor.active && s.monitor.established)
     val connecting = s.monitor.active && !s.monitor.established
     Page("课堂") {
         Panel {
             InfoRow("当前账户", s.login.displayName ?: if (confirmed) "已授权账户" else "未授权",
                 if (confirmed) "已授权" else if (s.login.busy) "验证中" else "去授权", "account", account)
             HorizontalDivider(color = CanvasColor)
-            InfoRow("当前课堂", s.monitor.lessonName.takeIf { s.monitor.active } ?: s.lesson?.classroomName ?: "未选择",
-                if (s.monitor.connection == ConnectionState.LISTENING) "已连接" else "选择课堂", "class", classroom)
+            InfoRow("当前课堂", s.monitor.lessonName.takeIf { s.monitor.active } ?: s.lesson?.displayName ?: "未选择",
+                if (s.monitor.active && s.monitor.connection == ConnectionState.LISTENING) "已连接" else if(s.lesson != null) "待扫码连接" else "选择课堂", "class", classroom)
             HorizontalDivider(color = CanvasColor)
             InfoRow("当前模型", if (s.apiSaved) s.model.displayName else "未配置",
                 if (s.apiVerified) s.model.checkName + "通过" else if (s.apiSaved) "待自检" else "去配置", "model", api)
@@ -166,18 +166,17 @@ val Amber = Color(0xFF946009)
             }
         }
         if (!confirmed) Text("首次使用：先授权账户，再选择课堂。", color = Muted, fontSize = 14.sp)
-        else Text("最新题目与处理结果，请到「题目」查看。", color = Muted, fontSize = 14.sp)
+        LatestQuestionSummary(s.latest,s.answer,latest)
         if (s.message.isNotBlank()) Text(s.message, color = Muted, fontSize = 14.sp)
         if ((s.monitor.active && s.monitor.connection != ConnectionState.LISTENING) ||
             (!s.monitor.active && s.monitor.message !in setOf(MonitorUiState().message,
                 "监听已关闭。", "已停止课堂监听。", "监听已停止，需要时请手动重新开始。")))
             Text(s.monitor.message, color = Amber, fontSize = 14.sp)
-        if (scan != null) OutlinedButton(onClick = scan) { Text("前往微信完成课堂扫码") }
     }
 }
 
-@Composable fun QuestionPage(record: QuestionRecord?, answer: AnswerTask?, mode: ClassroomMode, imageFile: (String, Int) -> File?) {
-    Page("题目") {
+@Composable fun QuestionPage(record: QuestionRecord?, answer: AnswerTask?, mode: ClassroomMode, imageFile: (String, Int) -> File?, back: (() -> Unit)? = null) {
+    Page("题目",back=back) {
         if (record == null) {
             Panel { Text("等待课堂发题", fontSize = 20.sp, fontWeight = FontWeight.SemiBold);Text("在课堂页开启发题通知或自动答题后，最新题目会显示在这里。", color = Muted) }
         } else {
@@ -211,13 +210,13 @@ val Amber = Color(0xFF946009)
                         record.loading -> "正在获取题目…"
                         mode == ClassroomMode.AUTO -> "本题尚无作答结果；只处理开启后收到且可作答的新题。"
                         mode == ClassroomMode.NOTIFY -> "当前为发题通知，不会自动作答。"
-                        else -> "当前已关闭，保留本题最后状态。"
+                        else -> "已记录题目，暂无 AI 作答结果。"
                     }
                 } else phaseTitle(ownAnswer.phase), fontSize = 20.sp,
                     color = if (ownAnswer?.phase == AnswerPhase.SUBMITTED) Teal else Ink)
                 Text(ownAnswer?.message ?: record.message, color = Muted, lineHeight = 23.sp)
             }
-            Text("收到新题后，本页自动更新。", color = Muted, fontSize = 12.sp)
+            Text("题目与答案保存在本机，可从课堂题目列表导出复习。", color = Muted, fontSize = 12.sp)
         }
     }
 }
@@ -231,7 +230,7 @@ fun phaseTitle(phase: AnswerPhase) = when(phase) {
     AnswerPhase.ALREADY_ANSWERED -> "本题已作答，未重复提交"
     AnswerPhase.UNCERTAIN -> "提交结果待确认"
     AnswerPhase.CANCELLED -> "已停止"
-    AnswerPhase.FAILED -> "未提交"
+    AnswerPhase.FAILED -> "处理失败 · 未提交"
     AnswerPhase.REHEARSED -> "未提交"
 }
 
@@ -245,7 +244,7 @@ fun phaseTitle(phase: AnswerPhase) = when(phase) {
                 BitmapFactory.decodeFile(file.path, options)
                 if (options.outWidth < 1 || options.outHeight < 1) null else {
                     options.inJustDecodeBounds = false
-                    while (maxOf(options.outWidth, options.outHeight) / options.inSampleSize > 2048) options.inSampleSize *= 2
+                    options.inSampleSize = ImageSampling.sampleSize(options.outWidth, options.outHeight)
                     BitmapFactory.decodeFile(file.path, options)
                 }
             } catch (_: Exception) { null }

@@ -10,7 +10,7 @@
     <queries><package android:name="com.tencent.mm" /></queries>
     <application
         android:allowBackup="false"
-        android:icon="@drawable/ic_rainnotify"
+        android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:enableOnBackInvokedCallback="true"
         android:usesCleartextTraffic="false"
