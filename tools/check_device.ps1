@@ -1,8 +1,10 @@
 param([string]$AdbPath, [string]$Serial)
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'toolchain.ps1')
+$tc = Initialize-RainToolchain
 $workspacePath = Split-Path -Parent $PSScriptRoot
 if (-not $AdbPath) {
-    $candidate = Join-Path $workspacePath '.local-tools\android-sdk\platform-tools\adb.exe'
+    $candidate = $tc.Adb
     if (Test-Path -LiteralPath $candidate) { $AdbPath = $candidate }
     else {
         $command = Get-Command adb -ErrorAction SilentlyContinue
@@ -13,7 +15,7 @@ if (-not $AdbPath -or -not (Test-Path -LiteralPath $AdbPath)) {
     [pscustomobject]@{status='adb_missing';action='Prepare official Platform Tools first.'} | ConvertTo-Json
     exit 2
 }
-$env:ANDROID_USER_HOME = Join-Path $workspacePath '.local-tools\android-user'
+# Android user directory comes from toolchain configuration.
 New-Item -ItemType Directory -Path $env:ANDROID_USER_HOME -Force | Out-Null
 $deviceLines = @(& $AdbPath devices)
 if ($LASTEXITCODE -ne 0) { throw 'ADB device enumeration failed.' }

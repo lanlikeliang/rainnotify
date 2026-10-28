@@ -1,9 +1,7 @@
 package cn.rainnotify.app.answer
 
-import android.app.Notification
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
+import android.app.Application
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
@@ -11,126 +9,140 @@ import android.os.PowerManager
 import android.os.SystemClock
 import androidx.lifecycle.MutableLiveData
 import cn.rainnotify.app.Diagnostics
-import cn.rainnotify.app.ProbeNotifications
 import cn.rainnotify.app.question.QuestionRepository
 import java.util.UUID
 
-/** All mutations are on the main thread. Real events and offline timers use the same wake gate. */
+/** Main-thread controller. There is no offline/AI-app entry point in the product. */
 object AutoAnswer {
     private val policy = AutoPolicy(SystemClock::elapsedRealtime)
+    private val pending = PendingAnswers()
+    private var drainScheduled = false
     private val main = Handler(Looper.getMainLooper())
     @Volatile private var binding: QuestionRepository.Binding? = null
     private var wake: PowerManager.WakeLock? = null
-    private var context: Context? = null
-    var provider = AiProvider.KIMI; private set
+    private var context: Application? = null
     var claimed = false; private set
-    val status = MutableLiveData("本次课堂自动模式未开启。")
+    val status = MutableLiveData("")
     val armed get() = policy.session != null
     val ticket get() = policy.ticket
     fun arm(context: Context): Boolean {
+        if (cn.rainnotify.app.monitor.MonitorState.stopRequested ||
+            cn.rainnotify.app.monitor.MonitorState.current().connection != cn.rainnotify.app.monitor.ConnectionState.LISTENING) return false
         val current = QuestionRepository.get(context).currentBinding() ?: return false
-        if (AiReadiness.issue(context, AiProvider.selected(context)) != null || AnswerState.task.value?.active == true || ticket != null) return false
-        this.context = context.applicationContext
+        if (AiReadiness.issue(context) != null || AnswerState.task.value?.active == true || ticket != null) return false
+        this.context = context.applicationContext as Application
         binding = current
+        pending.clear()
         policy.arm(UUID.randomUUID().toString())
-        status.value = "本次课堂自动模式已开启；新题将交给所选 AI，并尝试提交。"
-        notice(context, status.value!!)
+        status.value = "自动答题已开启，仅处理本次课堂之后收到的新题。"
         return true
     }
     fun disarm(context: Context) {
+        cn.rainnotify.app.monitor.MonitorState.automaticRequested = false
         val running = claimed && ticket != null
-        policy.disarm(); binding = null; claimed = false
+        pending.clear().forEach { recordSkipped(context, it, AnswerPhase.CANCELLED, "已关闭自动答题，未继续处理。") }
+        policy.disarm(); binding = null; claimed = false; drainScheduled = false
+        main.removeCallbacksAndMessages(null)
         releaseWake()
-        status.value = "自动模式已关闭。已发出的提交请求无法撤回。"
-        context.getSystemService(NotificationManager::class.java).cancel(12)
+        status.value = ""
         if (running) context.startService(Intent(context, AnswerService::class.java).setAction(AnswerService.STOP))
     }
-    fun accessibilityLost(context: Context) {
-        if (SolverSettings.isApi(context)) return
-        if (!armed && ticket == null) return
+    fun block(context: Context, message: String) {
         disarm(context)
-        status.value = "辅助服务已断开，自动模式已关闭；请检查 AI 设置后手动重新开启。"
-        notice(context, status.value!!)
+        status.value = "已切回发题通知：$message"
     }
     fun onQuestion(context: Context, id: String) {
         if (!armed) return
         if (QuestionRepository.get(context).activeBinding(id) !== binding) { disarm(context); return }
-        offer(context, id, policy.session)
+        AiReadiness.issue(context)?.let { block(context, it); return }
+        this.context = context.applicationContext as Application
+        val entry = PendingAnswers.Entry(UUID.randomUUID().toString(), id, SystemClock.elapsedRealtime())
+        if (!pending.offer(entry)) return
+        holdWake(context)
+        recordSkipped(context, entry, AnswerPhase.QUEUED, "已接收，等待前题完成；开始前会核对剩余时间。")
+        drain()
     }
-    fun simulate(context: Context, id: String) { offer(context, id, null) }
-    private fun offer(context: Context, id: String, session: String?) {
-        AiReadiness.issue(context, AiProvider.selected(context))?.let {
-            if (armed) disarm(context)
-            status.value = "自动作答未启动：$it"
-            notice(context, status.value!!)
+    private fun recordSkipped(context: Context, entry: PendingAnswers.Entry, phase: AnswerPhase, message: String) {
+        QuestionRepository.get(context).saveAnswer(AnswerTask(entry.taskId, entry.question, true, phase, message,
+            model = SolverSettings.model(context)))
+        if (phase == AnswerPhase.FAILED) try {
+            val open = android.app.PendingIntent.getActivity(context, 50,
+                Intent(context, cn.rainnotify.app.MainActivity::class.java).putExtra(cn.rainnotify.app.MainActivity.TAB,"classroom"),
+                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
+            context.getSystemService(android.app.NotificationManager::class.java).notify("answer-"+entry.taskId,9,
+                android.app.Notification.Builder(context,cn.rainnotify.app.ProbeNotifications.QUESTION_CHANNEL)
+                    .setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("本题未自动提交")
+                    .setContentText(message).setContentIntent(open).setAutoCancel(true)
+                    .setVisibility(android.app.Notification.VISIBILITY_PRIVATE).build())
+        } catch (_: SecurityException) { }
+    }
+    private fun holdWake(context: Context) {
+        releaseWake()
+        wake = context.getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
+            "rainnotify:api-start").apply { acquire(86_000) }
+    }
+    private fun scheduleDrain() {
+        if (drainScheduled || !armed || pending.size == 0) return
+        drainScheduled = true
+        main.postDelayed({ drainScheduled = false; drain() }, 500)
+    }
+    private fun drain() {
+        val context = context ?: return
+        if (!armed || ticket != null) return
+        if (AnswerState.task.value?.active == true) { scheduleDrain(); return }
+        if (cn.rainnotify.app.monitor.MonitorState.current().connection != cn.rainnotify.app.monitor.ConnectionState.LISTENING) {
+            scheduleDrain(); return
+        }
+        AiReadiness.issue(context)?.let { block(context, it); return }
+        while (true) {
+            val entry = pending.poll() ?: run { releaseWake(); return }
+            if (SystemClock.elapsedRealtime() - entry.received >= 73_000) {
+                recordSkipped(context, entry, AnswerPhase.FAILED, "排队后剩余时间不足，未提交；请在微信查看。")
+                continue
+            }
+            if (QuestionRepository.get(context).activeBinding(entry.question) !== binding) {
+                recordSkipped(context, entry, AnswerPhase.CANCELLED, "课堂已切换，未提交。")
+                continue
+            }
+            val token = policy.offer(entry.taskId, entry.question, policy.session, false, entry.received) ?: continue
+            claimed = false
+            status.value = "正在通过 DeepSeek API 作答，无需解锁。"
+            holdWake(context)
+            Diagnostics.record(context, "auto_event", mapOf("event_id" to token.id, "source" to "real"))
+            try {
+                context.startForegroundService(Intent(context, AnswerService::class.java).setAction(AnswerService.START)
+                    .putExtra(AnswerService.QUESTION, entry.question).putExtra(AnswerService.AUTO_TICKET, token.id))
+            } catch (_: RuntimeException) {
+                recordSkipped(context, entry, AnswerPhase.FAILED, "系统未允许后台作答，请检查后台设置。")
+                block(context, "系统未允许后台作答，请检查后台设置。")
+                return
+            }
+            main.postDelayed({ if (ticket?.id == token.id) {
+                if (claimed) context.startService(Intent(context, AnswerService::class.java).setAction(AnswerService.STOP))
+                else {
+                    recordSkipped(context, entry, AnswerPhase.FAILED, "本题自动流程未启动，已超时。")
+                    finish(token.id)
+                }
+            } }, (85_000 - (SystemClock.elapsedRealtime() - token.received)).coerceAtLeast(1))
             return
         }
-        val ticket = policy.offer(UUID.randomUUID().toString(), id, session, AnswerState.task.value?.active == true)
-        if (ticket == null) {
-            status.value = "另一题正在处理，本次新题未自动作答，请查看题目通知。"
-            notice(context, status.value!!); return
-        }
-        this.context = context.applicationContext
-        provider = AiProvider.selected(context)
-        claimed = false
-        val api = SolverSettings.isApi(context)
-        status.value = "已收到" + (if (ticket.live) "新题" else "演练事件") +
-            if (api) "，正在通过 DeepSeek API 作答，无需解锁。" else "，正在唤起作答；安全锁屏需解锁。"
-        wake = context.getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
-            "rainnotify:auto-gate").apply { acquire(86_000) }
-        Diagnostics.record(context, "auto_event", mapOf("event_id" to ticket.id,
-            "source" to if (ticket.live) "real" else "simulation"))
-        notice(context, status.value!!)
-        try {
-            if (api) context.startForegroundService(Intent(context, AnswerService::class.java).setAction(AnswerService.START)
-                .putExtra(AnswerService.QUESTION, id).putExtra(AnswerService.AUTO_TICKET, ticket.id))
-            else KimiAccessibilityService.instance?.startActivity(gateIntent(context).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        } catch (_: RuntimeException) {
-            finish(ticket.id)
-            status.value = "系统未允许后台作答，请从题目页手动开始。"
-            notice(context, status.value!!)
-        }
-        main.postDelayed({ if (policy.ticket?.id == ticket.id) {
-            if (claimed) context.startService(Intent(context, AnswerService::class.java).setAction(AnswerService.STOP))
-            finish(ticket.id)
-            status.value = "本题自动流程已超时，请手动查看；不会补交。"
-            notice(context, status.value!!)
-        } }, 85_000)
     }
     fun valid(id: String): Boolean {
         val current = policy.ticket ?: return false
-        return policy.valid(id) && (!current.live ||
-            context?.let { QuestionRepository.get(it).activeBinding(current.question) === binding } == true)
+        return current.live && policy.valid(id) &&
+            context?.let { QuestionRepository.get(it).activeBinding(current.question) === binding } == true
     }
     fun claim(id: String): Boolean {
         if (claimed || !valid(id)) return false
         claimed = true
-        releaseWake()
+        if (pending.size == 0) releaseWake()
         return true
     }
     fun finish(id: String) {
         if (ticket?.id != id) return
-        policy.finish(id); claimed = false; releaseWake()
-        context?.getSystemService(NotificationManager::class.java)?.cancel(12)
-        status.value = if (armed) "本次课堂自动模式已开启，等待下一题。" else "自动演练已结束。"
-        if (armed) context?.let { notice(it, status.value!!) }
+        policy.finish(id); claimed = false; if (pending.size == 0) releaseWake()
+        status.value = ""
+        scheduleDrain()
     }
     private fun releaseWake() { if (wake?.isHeld == true) wake?.release(); wake = null }
-    fun gateIntent(context: Context) = Intent(context, AutoGateActivity::class.java)
-        .putExtra("ticket", ticket?.id).setData(android.net.Uri.parse("rainnotify://auto/" + ticket?.id))
-    private fun notice(context: Context, message: String) {
-        ProbeNotifications.createChannels(context)
-        val open = PendingIntent.getActivity(context, 80, if (ticket != null && SolverSettings.isApi(context))
-            Intent(context, AnswerActivity::class.java).putExtra(AnswerService.QUESTION, ticket?.question)
-            else if (ticket != null) gateIntent(context)
-            else Intent(context, AiSettingsActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val stop = PendingIntent.getService(context, 81, Intent(context, AnswerService::class.java).setAction(AnswerService.DISARM),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        try { context.getSystemService(NotificationManager::class.java).notify(12,
-            Notification.Builder(context, ProbeNotifications.STATUS_CHANNEL).setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle("雨课堂自动作答" + if (ticket?.live == false) " · 演练" else "")
-                .setContentText(message).setOngoing(armed || ticket != null).setOnlyAlertOnce(true)
-                .setContentIntent(open).addAction(Notification.Action.Builder(null, "停止自动模式", stop).build())
-                .setVisibility(Notification.VISIBILITY_PRIVATE).build()) } catch (_: SecurityException) { }
-    }
 }

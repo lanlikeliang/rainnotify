@@ -1,8 +1,10 @@
 param()
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'toolchain.ps1')
+$tc = Initialize-RainToolchain
 $workspacePath = Split-Path -Parent $PSScriptRoot
-$env:ANDROID_USER_HOME = Join-Path $workspacePath '.local-tools\android-user'
-$adb = Join-Path $workspacePath '.local-tools\android-sdk\platform-tools\adb.exe'
+# Android user directory comes from toolchain configuration.
+$adb = $tc.Adb
 $component = 'cn.rainnotify.app.debug/cn.rainnotify.app.answer.KimiAccessibilityService'
 $enabled = (& $adb shell settings get secure enabled_accessibility_services | Out-String).Trim().Split(':') -contains $component
 $dump = & $adb shell dumpsys accessibility

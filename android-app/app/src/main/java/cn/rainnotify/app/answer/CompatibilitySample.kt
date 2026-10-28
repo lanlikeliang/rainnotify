@@ -15,6 +15,20 @@ import java.security.SecureRandom
 /** Synthetic, local-only samples. The randomized answer exists in pixels, never in the prompt. */
 object CompatibilitySample {
     class Sample(val prepared: PreparedQuestion, val expected: List<String>)
+    /** Text-only check never claims to validate vision. */
+    fun createText(id: String, type: Int, directory: File): Sample {
+        require(type in CompatibilityPolicy.requiredTypes)
+        val labels = listOf("A", "B", "C", "D")
+        val random = SecureRandom()
+        val expected = if (type == 1) listOf(labels[random.nextInt(4)])
+            else listOf(labels[random.nextInt(2)], labels[2 + random.nextInt(2)])
+        val content = QuestionContent(type, "请选择所有写着“本次目标”的选项。",
+            labels.map { QuestionOption(it, null, if (it in expected) "本次目标" else "不是目标") },
+            emptyList(), null, emptyList())
+        val record = QuestionRecord(id, QuestionRef("0", "0", "0"), System.currentTimeMillis(),
+            content, "本地文本自检", false, offline = true)
+        return Sample(PreparedQuestion(record, directory, emptyList()), expected)
+    }
     fun create(id: String, type: Int, directory: File): Sample {
         require(type in CompatibilityPolicy.requiredTypes)
         directory.mkdirs()

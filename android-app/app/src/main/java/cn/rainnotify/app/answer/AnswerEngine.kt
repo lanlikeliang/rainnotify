@@ -3,7 +3,7 @@ package cn.rainnotify.app.answer
 import cn.rainnotify.app.monitor.ProblemTiming
 import cn.rainnotify.app.question.QuestionContent
 
-enum class AnswerPhase { PREPARING, SOLVING, CHECKING, SUBMITTING, SUBMITTED, ALREADY_ANSWERED,
+enum class AnswerPhase { QUEUED, PREPARING, SOLVING, CHECKING, SUBMITTING, SUBMITTED, ALREADY_ANSWERED,
     REHEARSED, CANCELLED, FAILED, UNCERTAIN }
 class AnswerResult(val phase: AnswerPhase, val message: String, val answer: List<String> = emptyList())
 

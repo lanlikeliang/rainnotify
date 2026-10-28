@@ -10,10 +10,10 @@ class AutoPolicy(private val clock: () -> Long) {
     private val seen = LinkedHashSet<String>()
     fun arm(session: String) { require(session.isNotEmpty()); disarm(); this.session = session }
     fun disarm() { session = null; ticket = null; seen.clear() }
-    fun offer(id: String, question: String, liveSession: String?, busy: Boolean): Ticket? {
+    fun offer(id: String, question: String, liveSession: String?, busy: Boolean, received: Long = clock()): Ticket? {
         if (busy || ticket != null || (liveSession != null && question in seen)) return null
         if (liveSession != null && liveSession != session) return null
-        return Ticket(id, question, liveSession, clock()).also {
+        return Ticket(id, question, liveSession, received).also {
             ticket = it; if (liveSession != null) seen.add(question)
             if (seen.size > 256) seen.remove(seen.first())
         }

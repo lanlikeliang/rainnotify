@@ -38,22 +38,6 @@ object ProbeNotifications {
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
-    fun status(context: Context): Notification {
-        val stop = PendingIntent.getService(
-            context, 1, Intent(context, NotificationProbeService::class.java)
-                .setAction(NotificationProbeService.ACTION_STOP),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-        return Notification.Builder(context, STATUS_CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("通知验证正在运行")
-            .setContentText("当前没有接入雨课堂，点击停止结束验证")
-            .setContentIntent(openApp(context))
-            .setOngoing(true)
-            .addAction(Notification.Action.Builder(null, "停止验证", stop).build())
-            .build()
-    }
-
     fun simulate(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
         val readiness = NotificationReadiness.read(context)
@@ -68,7 +52,7 @@ object ProbeNotifications {
         try {
             manager.notify(eventId, 2, Notification.Builder(context, QUESTION_CHANNEL)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle("模拟新题提醒")
+                .setContentTitle("通知测试")
                 .setContentText("请确认横幅、锁屏通知、声音或振动。这不是雨课堂真实题目。")
                 .setContentIntent(openApp(context))
                 .setCategory(Notification.CATEGORY_REMINDER)

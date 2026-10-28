@@ -1,8 +1,10 @@
 param([switch]$IncludeAnswer)
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'toolchain.ps1')
+$tc = Initialize-RainToolchain
 $workspacePath = Split-Path -Parent $PSScriptRoot
-$adbPath = Join-Path $workspacePath '.local-tools\android-sdk\platform-tools\adb.exe'
-$env:ANDROID_USER_HOME = Join-Path $workspacePath '.local-tools\android-user'
+$adbPath = $tc.Adb
+# Android user directory comes from toolchain configuration.
 $devices = @(& $adbPath devices | ForEach-Object { if ($_ -match '^([^\s]+)\s+device$') { $Matches[1] } })
 if ($devices.Count -ne 1) { throw 'Connect exactly one authorized Android device.' }
 # Read only our own task status. Do not use uiautomator during an accessibility run:

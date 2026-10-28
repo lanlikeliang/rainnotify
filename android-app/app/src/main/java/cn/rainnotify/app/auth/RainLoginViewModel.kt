@@ -24,6 +24,7 @@ data class LoginUiState(
     val lessons: List<LessonSummary> = emptyList(),
     val qr: Bitmap? = null,
     val qrSaved: Boolean = false,
+    val sessionExpired: Boolean = false,
 )
 
 class RainLoginViewModel(application: Application) : AndroidViewModel(application) {
@@ -249,6 +250,7 @@ class RainLoginViewModel(application: Application) : AndroidViewModel(applicatio
             failure.businessCode?.let { fields["business_code"] = it }
             Diagnostics.record(getApplication(), "auth_operation_failed", fields)
             publish(next, latest.copy(message = failure.userMessage(), busy = false, qr = null, qrSaved = false,
+                sessionExpired = failure.reason == FailureReason.SESSION_EXPIRED,
                 authenticated = latest.authenticated && failure.reason != FailureReason.SESSION_EXPIRED))
             if (!disposed) worker.execute { if (gate.isCurrent(next)) cleanupQr() }
         }

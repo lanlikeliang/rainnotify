@@ -44,7 +44,9 @@ sealed interface LoginMessage {
     data object Waiting : LoginMessage
 }
 
-data class LessonSummary(val id: String, val classroomName: String)
+data class LessonSummary(val id: String, val classroomName: String, val courseName: String? = null) {
+    val displayName get() = listOfNotNull(courseName?.takeIf { it.isNotBlank() }, classroomName).distinct().joinToString(" · ")
+}
 
 object RainProtocol {
     const val ORIGIN = "https://www.yuketang.cn/"
@@ -119,7 +121,7 @@ object RainProtocol {
             val name = item.opt("classroomName") as? String
             if ((rawId !is Number && rawId !is String) || rawId.toString().isBlank()
                 || name.isNullOrBlank()) throw RainFailure(FailureReason.RESPONSE_FORMAT, "classrooms")
-            LessonSummary(rawId.toString(), name.take(200))
+            LessonSummary(rawId.toString(), name.take(200), (item.opt("courseName") as? String)?.trim()?.takeIf { it.isNotEmpty() }?.take(200))
         }.distinctBy { it.id }
     }
 }

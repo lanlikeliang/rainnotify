@@ -10,10 +10,23 @@ import java.io.File
 import android.util.AtomicFile
 
 class AnswerTask(val id: String, val questionId: String, val live: Boolean, val phase: AnswerPhase,
-    val message: String, val answer: List<String> = emptyList(), val startedAt: Long = System.currentTimeMillis()) {
+    val message: String, val answer: List<String> = emptyList(), val startedAt: Long = System.currentTimeMillis(),
+    val model: DeepSeekModel = DeepSeekModel.FLASH) {
     val active get() = phase in setOf(AnswerPhase.PREPARING, AnswerPhase.SOLVING, AnswerPhase.CHECKING, AnswerPhase.SUBMITTING)
     fun changed(phase: AnswerPhase, message: String, answer: List<String> = this.answer) =
-        AnswerTask(id, questionId, live, phase, message, answer, startedAt)
+        AnswerTask(id, questionId, live, phase, message, answer, startedAt, model)
+    fun json(): JSONObject = JSONObject().put("id", id).put("question", questionId).put("live", live)
+        .put("phase", phase.name).put("message", message).put("answer", JSONArray(answer))
+        .put("model", model.id).put("started", startedAt)
+    companion object {
+        fun fromJson(data: JSONObject): AnswerTask {
+            val answers = data.getJSONArray("answer")
+            return AnswerTask(data.getString("id"), data.getString("question"), data.getBoolean("live"),
+                AnswerPhase.valueOf(data.getString("phase")), data.getString("message"),
+                (0 until answers.length()).map { answers.getString(it) }, data.getLong("started"),
+                DeepSeekModel.fromId(data.optString("model")))
+        }
+    }
     override fun toString() = "AnswerTask(redacted)"
 }
 
@@ -27,9 +40,10 @@ object AnswerState {
         try {
             stream.write(JSONObject().put("id", value.id).put("question", value.questionId).put("live", value.live)
                 .put("phase", value.phase.name).put("message", value.message).put("answer", JSONArray(value.answer))
-                .put("started", value.startedAt).toString().toByteArray(Charsets.UTF_8))
+                .put("model", value.model.id).put("started", value.startedAt).toString().toByteArray(Charsets.UTF_8))
             storage.finishWrite(stream)
         } catch (e: Exception) { storage.failWrite(stream); throw e }
+        cn.rainnotify.app.question.QuestionRepository.get(context).saveAnswer(value)
         main.post { task.value = value }
     }
     @Synchronized fun restore(context: Context) {
@@ -39,7 +53,7 @@ object AnswerState {
             val phase = AnswerPhase.valueOf(data.getString("phase"))
             val answers = data.getJSONArray("answer")
             AnswerTask(data.getString("id"), data.getString("question"), data.getBoolean("live"), phase,
-                data.getString("message"), (0 until answers.length()).map { answers.getString(it) }, data.getLong("started"))
+                data.getString("message"), (0 until answers.length()).map { answers.getString(it) }, data.getLong("started"), DeepSeekModel.fromId(data.optString("model")))
         } catch (_: Exception) { return }
         val recovered = when {
             saved.phase == AnswerPhase.SUBMITTING -> saved.changed(AnswerPhase.UNCERTAIN, "上次提交时流程被中断；请到微信核对，不会重发。")
@@ -47,5 +61,6 @@ object AnswerState {
             else -> saved
         }
         task.value = recovered
+        cn.rainnotify.app.question.QuestionRepository.get(context).saveAnswer(recovered)
     }
 }

@@ -1,18 +1,19 @@
-param([string]$Serial)
+param([string]$Serial, [ValidateSet('Debug','Release')][string]$Variant='Debug', [string]$ReportPath)
 $ErrorActionPreference = 'Stop'
-$workspacePath = Split-Path -Parent $PSScriptRoot
-$adbPath = Join-Path $workspacePath '.local-tools\android-sdk\platform-tools\adb.exe'
-$env:ANDROID_USER_HOME = Join-Path $workspacePath '.local-tools\android-user'
-$lines = @(& $adbPath devices)
-$connected = @($lines | ForEach-Object { if ($_ -match '^([^\s]+)\s+device$') { $Matches[1] } })
-if (-not $Serial -and $connected.Count -eq 1) { $Serial = $connected[0] }
-if (-not $Serial -or $Serial -notin $connected) { throw 'Select one authorized connected device using -Serial.' }
-# Read only this project's debug App; do not export WeChat or system-wide logs.
-$reportLines = @(& $adbPath -s $Serial exec-out run-as 'cn.rainnotify.app.debug' cat 'files/diagnostics.jsonl')
-if ($LASTEXITCODE -ne 0) { throw 'Cannot read diagnostics. Open the debug App first.' }
-$reportFolder = Join-Path $workspacePath 'diagnostic-reports'
-New-Item -ItemType Directory -Path $reportFolder -Force | Out-Null
-$stamp = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')
-$reportPath = Join-Path $reportFolder ("probe-$stamp-utc.jsonl")
-[IO.File]::WriteAllText($reportPath, ($reportLines -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
-[pscustomobject]@{report=$reportPath;lines=$reportLines.Count} | ConvertTo-Json
+$root = Split-Path -Parent $PSScriptRoot
+if ($ReportPath) {
+    & python (Join-Path $PSScriptRoot 'analyze_diagnostics.py') $ReportPath
+    if ($LASTEXITCODE) { throw 'Diagnostic analysis failed.' }
+    exit 0
+}
+if ($Variant -eq 'Release') { throw 'Release does not allow run-as. In the app use Settings > Notifications > Export diagnostics, transfer that report, then pass -ReportPath.' }
+. (Join-Path $PSScriptRoot 'toolchain.ps1')
+$tc = Initialize-RainToolchain
+$Serial = Select-RainDevice $tc $Serial
+$lines = @(& $tc.Adb -s $Serial exec-out run-as cn.rainnotify.app.debug cat files/diagnostics.jsonl)
+if ($LASTEXITCODE) { throw 'Cannot read debug diagnostics. Open the debug app first.' }
+$folder = Join-Path $root 'diagnostic-reports'
+New-Item -ItemType Directory -Path $folder -Force | Out-Null
+$path = Join-Path $folder ('probe-' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-utc.jsonl')
+[IO.File]::WriteAllText($path, ($lines -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
+[pscustomobject]@{report=$path;lines=$lines.Count} | ConvertTo-Json

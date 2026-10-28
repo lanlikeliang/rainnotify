@@ -5,6 +5,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.OutputStream
 import cn.rainnotify.app.answer.AnswerFailure
+import cn.rainnotify.app.answer.AnswerTask
 import cn.rainnotify.app.answer.PreparedQuestion
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -19,14 +20,17 @@ class QuestionRecord(
     val loading: Boolean = true,
     val imageErrors: Map<Int, String> = emptyMap(),
     val offline: Boolean = false,
+    val lessonName: String = "", val accountScope: String = "", val recovered: Boolean = false,
 ) {
+    val classroomKey get() = reference.lessonId
     override fun toString() = "QuestionRecord(redacted)"
     fun changed(content: QuestionContent? = this.content, message: String = this.message,
         loading: Boolean = this.loading, imageErrors: Map<Int, String> = this.imageErrors) =
-        QuestionRecord(id, reference, receivedAt, content, message, loading, imageErrors, offline)
+        QuestionRecord(id, reference, receivedAt, content, message, loading, imageErrors, offline, lessonName, accountScope, recovered)
 
     fun json(): JSONObject = JSONObject().put("id", id).put("ref", reference.json()).put("received", receivedAt)
         .put("content", content?.json()).put("message", message).put("loading", loading).put("offline", offline)
+        .put("lesson_name", lessonName).put("account_scope", accountScope).put("recovered", recovered)
         .put("image_errors", JSONArray(imageErrors.map { JSONObject().put("index", it.key).put("message", it.value) }))
 
     companion object {
@@ -37,14 +41,14 @@ class QuestionRecord(
                 value.getString("message"), value.getBoolean("loading"),
                 (0 until errors.length()).associate { i -> errors.getJSONObject(i).let {
                     it.getInt("index") to it.getString("message")
-                } }, value.optBoolean("offline", false))
+                } }, value.optBoolean("offline", false), value.optString("lesson_name"), value.optString("account_scope"), value.optBoolean("recovered"))
         }
     }
 }
 
-/** App-private, excluded from Android backup. No cookies, answers, or full presentation responses. */
-class QuestionFiles(private val root: File, private val maxRecords: Int = 20,
-    private val maxBytes: Long = 80 * 1024 * 1024L) {
+/** App-private question and answer archive, excluded from Android backup. No cookies or full presentation responses. */
+class QuestionFiles(private val root: File, private val maxRecords: Int = Int.MAX_VALUE,
+    private val maxBytes: Long = Long.MAX_VALUE) {
     init { root.mkdirs() }
     private fun folder(id: String): File {
         require(validId(id))
@@ -59,6 +63,15 @@ class QuestionFiles(private val root: File, private val maxRecords: Int = 20,
                 QuestionRecord.fromJson(JSONObject(file.readText())).takeIf { it.id == dir.name }
             } catch (_: Exception) { null }
         }?.sortedByDescending { it.receivedAt } ?: emptyList()
+
+    @Synchronized fun record(id: String): QuestionRecord? {
+        if (!validId(id)) return null
+        return try {
+            val file = File(folder(id), "question.json")
+            if (!file.isFile || file.length() > 2 * 1024 * 1024) null
+            else QuestionRecord.fromJson(JSONObject(file.readText())).takeIf { it.id == id }
+        } catch (_: Exception) { null }
+    }
 
     @Synchronized fun write(record: QuestionRecord) {
         val dir = folder(record.id).apply { mkdirs() }
@@ -79,6 +92,24 @@ class QuestionFiles(private val root: File, private val maxRecords: Int = 20,
         return File(folder(id), "image-" + index + ".bin").takeIf { it.isFile }
     }
 
+    @Synchronized fun saveAnswer(value: AnswerTask): Boolean {
+        val dir = folder(value.questionId)
+        if (!File(dir, "question.json").isFile) return false
+        atomicWrite(File(dir, "answer.json"), value.json().toString().toByteArray(Charsets.UTF_8))
+        return true
+    }
+    @Synchronized fun answers(): Map<String, AnswerTask> = root.listFiles().orEmpty()
+        .filter { it.isDirectory && validId(it.name) }.mapNotNull { directory ->
+            try {
+                val file = File(directory, "answer.json")
+                if (!file.isFile || file.length() > 65_536) null else AnswerTask.fromJson(JSONObject(file.readText()))
+                    .takeIf { it.questionId == directory.name }?.let { directory.name to it }
+            } catch (_: Exception) { null }
+        }.toMap()
+    fun exportStudy(output: OutputStream, classroom: String) {
+        val snapshot = synchronized(this) { records().filter { it.classroomKey == classroom } to answers() }
+        StudyExport.write(output, snapshot.first, snapshot.second, ::image)
+    }
     @Synchronized fun removeImages(id: String) {
         val dir = folder(id)
         for (index in 0 until QuestionProtocol.MAX_ASSETS) File(dir, "image-" + index + ".bin").delete()
@@ -92,7 +123,7 @@ class QuestionFiles(private val root: File, private val maxRecords: Int = 20,
     }
 
     @Synchronized fun prepare(id: String, directory: File): PreparedQuestion {
-        val record = records().firstOrNull { it.id == id } ?: throw AnswerFailure("题目记录已清理，请重新查看题目。")
+        val record = record(id) ?: throw AnswerFailure("题目记录已清理，请重新查看题目。")
         val question = record.content ?: throw AnswerFailure("尚未获取完整题目内容。")
         if (record.loading || record.imageErrors.isNotEmpty()) throw AnswerFailure("题目或图片尚未完整获取，请稍后重试。")
         if (question.bodyHtml.isBlank() && question.assets.isEmpty()) throw AnswerFailure("题目缺少题干和原图。")
@@ -113,6 +144,7 @@ class QuestionFiles(private val root: File, private val maxRecords: Int = 20,
     }
 
     private fun prune(current: String) {
+        if (maxRecords == Int.MAX_VALUE && maxBytes == Long.MAX_VALUE) return
         val records = records().toMutableList()
         fun size() = root.walkTopDown().filter { it.isFile }.sumOf { it.length() }
         var bytes = size()

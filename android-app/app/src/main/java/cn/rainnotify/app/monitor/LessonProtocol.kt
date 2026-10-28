@@ -53,7 +53,7 @@ sealed interface LessonSignal {
     data object Unsupported : LessonSignal
     class ProblemClosed(val problemId: String) : LessonSignal
     class TimeChanged(val problemId: String) : LessonSignal
-    class Question(val fingerprint: String, val reference: QuestionRef) : LessonSignal
+    class Question(val fingerprint: String, val reference: QuestionRef, val recovered: Boolean = false, val closed: Boolean = false) : LessonSignal
 }
 
 /** Candidate event contract from the public student receiver, pending a real classroom trace.
@@ -64,6 +64,9 @@ class LessonEvents(private val lessonId: String) {
     private var presentation: String? = null
     private val seen = LinkedHashSet<String>()
     private var ready = false
+    private var hasBaseline = false
+    private val recovered = mutableListOf<LessonSignal.Question>()
+    fun takeRecovered(): List<LessonSignal.Question> = recovered.toList().also { recovered.clear() }
 
     fun disconnected() { ready = false; presentation = null }
 
@@ -110,15 +113,29 @@ class LessonEvents(private val lessonId: String) {
     }
 
     private fun readSnapshot(root: JSONObject, timeline: JSONArray) {
-        // Never alert for history. Only seed identifiable unlock entries; unknown shapes stay ignored.
+        // First connection seeds history. Later snapshots recover previously unseen events only.
+        val mayRecover = hasBaseline
+        LessonProtocol.id(root.opt("presentation"))?.let { presentation = it }
+        val closed = (0 until timeline.length()).mapNotNull { timeline.optJSONObject(it) }
+            .filter { it.optString("op") == "problemfinished" }
+            .mapNotNull { LessonProtocol.id(it.opt("prob")) }.toSet()
         for (i in 0 until timeline.length()) {
             val item = timeline.optJSONObject(i) ?: continue
             LessonProtocol.id(item.opt("pres"))?.let { presentation = it }
             if (item.optString("op") == "unlockproblem") {
-                key(item.optJSONObject("problem") ?: item)?.let { remember(it) }
+                val problem = item.optJSONObject("problem") ?: item
+                val fingerprint = key(problem) ?: continue
+                val fresh = remember(fingerprint)
+                val problemId = LessonProtocol.id(problem.opt("prob")) ?: continue
+                if (mayRecover && fresh) recovered.add(LessonSignal.Question(fingerprint,
+                    QuestionRef(lessonId, presentation!!, problemId,
+                        LessonProtocol.id(problem.opt("sid"))?.takeUnless { it == "0" },
+                        problem.optInt("si", 0).takeIf { it > 0 },
+                        LessonProtocol.id(problem.opt("groupid"))?.let { it != "0" } == true), true, problemId in closed))
             }
         }
         LessonProtocol.id(root.opt("presentation"))?.let { presentation = it }
+        hasBaseline = true
     }
 
     private fun key(problem: JSONObject): String? {

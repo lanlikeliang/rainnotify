@@ -157,6 +157,7 @@ class LessonConnection(
                         else -> Unit
                     }
                     observer.signal(signal)
+                    if (ready) events.takeRecovered().forEach { observer.signal(it) }
                 } catch (_: RainFailure) {
                     observer.diagnostic("monitor_protocol_rejected")
                     terminate(ConnectionState.FAILED)

@@ -2,19 +2,16 @@ package cn.rainnotify.app.answer
 
 import android.content.Context
 import android.graphics.BitmapFactory
-
-enum class SolverMode { APP, DEEPSEEK_API }
+import androidx.core.content.edit
 
 object SolverSettings {
     private fun prefs(c: Context) = c.getSharedPreferences("solver-v1", Context.MODE_PRIVATE)
-    fun mode(c: Context) = if (prefs(c).getBoolean("api", false)) SolverMode.DEEPSEEK_API else SolverMode.APP
-    fun isApi(c: Context) = mode(c) == SolverMode.DEEPSEEK_API
-    fun select(c: Context, choice: SolverMode) {
-        if (mode(c) == choice) return
-        changed(c)
-        prefs(c).edit().putBoolean("api", choice == SolverMode.DEEPSEEK_API).apply()
+    fun model(c: Context) = DeepSeekModel.fromId(prefs(c).getString("model", null))
+    fun selectModel(c: Context, value: DeepSeekModel) {
+        if (model(c) == value) return
+        keyChanged(c)
+        prefs(c).edit { putString("model", value.id) }
     }
-    fun title(c: Context) = if (isApi(c)) "DeepSeek API" else AiProvider.selected(c).title + " App"
     fun revision(c: Context) = prefs(c).getLong("revision", 0)
     fun changed(c: Context) {
         AutoAnswer.disarm(c)
@@ -23,11 +20,14 @@ object SolverSettings {
     fun keyChanged(c: Context) {
         changed(c); prefs(c).edit().remove("verified").apply()
     }
-    fun apiVerified(c: Context) = ApiKeyVault(c).exists() && prefs(c).getString("verified", null) == DeepSeekApi.MODEL + ":v1"
-    fun markVerified(c: Context) { prefs(c).edit().putString("verified", DeepSeekApi.MODEL + ":v1").apply() }
+    fun apiVerified(c: Context) = ApiKeyVault(c).exists() && prefs(c).getString("verified", null) == model(c).verificationKey && prefs(c).getLong("verified_revision", -1) == revision(c)
+    fun markVerified(c: Context) { prefs(c).edit {
+        putString("verified", model(c).verificationKey)
+        putLong("verified_revision", revision(c)); putLong("verified_at", System.currentTimeMillis())
+    } }
     fun apiIssue(c: Context, requireVerified: Boolean): String? = when {
-        !ApiKeyVault(c).exists() -> "请在设置 → AI 作答方式 → DeepSeek API 中保存 API Key。"
-        requireVerified && !apiVerified(c) -> "请先在 DeepSeek API 设置中通过图文自检，再开启自动作答或提交。"
+        !ApiKeyVault(c).exists() -> "请在设置 → AI 服务 中保存 API Key。"
+        requireVerified && !apiVerified(c) -> "请先在 DeepSeek API 设置中通过${model(c).checkName}，再开启自动作答或提交。"
         else -> null
     }
     fun images(prepared: PreparedQuestion): List<ApiImage> {
