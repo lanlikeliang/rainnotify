@@ -15,22 +15,28 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
 import cn.rainnotify.app.answer.AnswerFailure
+import cn.rainnotify.app.answer.AnswerTask
+import cn.rainnotify.app.answer.AnswerPhase
 import cn.rainnotify.app.monitor.LessonConnection
 
 /** All content IO is separate from the socket queue and notification path. */
 class QuestionRepository private constructor(context: Context) {
     private val app = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
-    private val worker = Executors.newSingleThreadExecutor()
+    private val worker = Executors.newFixedThreadPool(3)
+    private val resultWorker = Executors.newSingleThreadExecutor()
+    private val publishSequence = AtomicLong(0)
     private val files = QuestionFiles(File(app.noBackupFilesDir, "questions-v1"))
     private val images = QuestionImages()
     private val pending = ConcurrentHashMap.newKeySet<String>()
     private val generation = AtomicLong(0)
-    class Binding(val lesson: String, val api: RainApi, val connection: LessonConnection, val accountScope: String)
+    class Binding(val lesson: String, val api: RainApi, val connection: LessonConnection, val accountScope: String, val lessonName: String)
     private val liveRecords = ConcurrentHashMap<String, Binding>()
     @Volatile private var binding: Binding? = null
     val records = MutableLiveData<List<QuestionRecord>>(emptyList())
     val latest = MutableLiveData<QuestionRecord?>(null)
+    val answers = MutableLiveData<Map<String, AnswerTask>>(emptyMap())
+    private val pendingAnswers = ConcurrentHashMap<String, AnswerTask>()
     @Volatile private var latestId: String? = null
     fun hideLatest() { latestId = null; latest.value = null }
     val liveLesson = MutableLiveData<String?>(null)
@@ -40,14 +46,18 @@ class QuestionRepository private constructor(context: Context) {
             files.records().filter { it.loading }.forEach {
                 files.write(it.changed(loading = false, message = "上次获取被中断；已保留获取到的内容。"))
             }
+            files.answers().values.filter { it.active || it.phase == AnswerPhase.QUEUED }.forEach {
+                files.saveAnswer(it.changed(if (it.phase == AnswerPhase.SUBMITTING) AnswerPhase.UNCERTAIN else AnswerPhase.FAILED,
+                    if (it.phase == AnswerPhase.SUBMITTING) "上次提交被中断，请在微信核对，不会重发。" else "上次处理被中断，未自动恢复。"))
+            }
             publish()
         }
     }
 
-    fun attach(lesson: String, api: RainApi, connection: LessonConnection, accountScope: String) {
+    fun attach(lesson: String, api: RainApi, connection: LessonConnection, accountScope: String, lessonName: String = "") {
         liveRecords.clear()
         hideLatest()
-        binding = Binding(lesson, api, connection, accountScope)
+        binding = Binding(lesson, api, connection, accountScope, lessonName)
         liveLesson.value = lesson
     }
 
@@ -59,19 +69,21 @@ class QuestionRepository private constructor(context: Context) {
         liveLesson.value = null
     }
 
-    fun capture(reference: QuestionRef): String {
+    fun capture(reference: QuestionRef, recovered: Boolean = false): String {
         val id = UUID.randomUUID().toString()
-        val record = QuestionRecord(id, reference, System.currentTimeMillis())
+        val active = binding
+        val record = QuestionRecord(id, reference, System.currentTimeMillis(), lessonName = active?.lessonName.orEmpty(),
+            accountScope = active?.accountScope.orEmpty(), recovered = recovered)
         latestId = id
         latest.value = record
         val version = generation.get()
-        val active = binding
         if (active != null) liveRecords[id] = active
         pending.add(id)
         worker.execute {
             try {
                 if (version != generation.get()) return@execute
                 files.write(record)
+                flushAnswer(id)
                 publish()
                 load(record, active, version)
             } catch (_: Exception) {
@@ -87,7 +99,7 @@ class QuestionRepository private constructor(context: Context) {
         val active = binding
         worker.execute {
             try {
-                val record = files.records().firstOrNull { it.id == id } ?: return@execute
+                val record = files.record(id) ?: return@execute
                 if (version == generation.get()) load(record, active, version)
             } catch (_: Exception) {
                 Diagnostics.record(app, "question_storage_failed", mapOf("event_id" to id))
@@ -171,6 +183,21 @@ class QuestionRepository private constructor(context: Context) {
         publish()
     }
 
+    fun saveAnswer(value: AnswerTask) {
+        pendingAnswers[value.questionId] = value
+        flushAnswer(value.questionId)
+    }
+    private fun flushAnswer(id: String) {
+        // Capture and progress use the same writer; a late QUEUED write cannot replace a final result.
+        resultWorker.execute {
+            val value = pendingAnswers[id] ?: return@execute
+            try {
+                if (files.saveAnswer(value)) pendingAnswers.remove(id, value)
+                publish()
+            } catch (_: Exception) { Diagnostics.record(app, "answer_storage_failed", mapOf("event_id" to value.id)) }
+        }
+    }
+    fun exportStudy(output: java.io.OutputStream, classroom: String) = files.exportStudy(output, classroom)
     fun image(id: String, index: Int) = files.image(id, index)
 
     fun activeBinding(id: String): Binding? = liveRecords[id]?.takeIf { it === binding }
@@ -178,7 +205,7 @@ class QuestionRepository private constructor(context: Context) {
     fun reloadLocal() { worker.execute { publish() } }
     fun bindingStillCurrent(value: Binding) = binding === value
     fun prepare(id: String, directory: File) = files.prepare(id, directory)
-    fun isLoading(id: String) = id in pending || files.records().firstOrNull { it.id == id }?.loading == true
+    fun isLoading(id: String) = id in pending || files.record(id)?.loading == true
 
     fun clear() {
         generation.incrementAndGet()
@@ -188,9 +215,13 @@ class QuestionRepository private constructor(context: Context) {
     }
 
     private fun publish() {
+        val sequence = publishSequence.incrementAndGet()
         val snapshot = files.records()
+        val results = files.answers() + pendingAnswers
         main.post {
+            if (sequence != publishSequence.get()) return@post
             records.value = snapshot
+            answers.value = results
             // A queued publish from an older capture must never replace a newer question.
             snapshot.firstOrNull { it.id == latestId }?.let { latest.value = it }
         }

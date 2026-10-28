@@ -45,7 +45,7 @@ class AnswerService : Service() {
         val revision = SolverSettings.revision(this)
         val model = SolverSettings.model(this)
         val run = RunControl().also { control = it }
-        val task = AnswerTask(UUID.randomUUID().toString(), id!!, true, AnswerPhase.PREPARING, "正在获取本题图文…", model = model)
+        val task = AnswerTask(automatic.id, id!!, true, AnswerPhase.PREPARING, "正在获取本题图文…", model = model)
         current = task
         wake = getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
             "rainnotify:api-answer").apply { acquire(95_000) }
@@ -55,7 +55,8 @@ class AnswerService : Service() {
                 progress(AnswerPhase.PREPARING, task.message)
                 AiReadiness.issue(this)?.let { throw AnswerFailure(it) }
                 val repo = QuestionRepository.get(this)
-                while (repo.isLoading(id) && SystemClock.elapsedRealtime() < automatic.received + 10_000) {
+                val contentWaitUntil = minOf(SystemClock.elapsedRealtime() + 10_000, automatic.received + 70_000)
+                while (repo.isLoading(id) && SystemClock.elapsedRealtime() < contentWaitUntil) {
                     run.check(); Thread.sleep(150)
                 }
                 run.check()
@@ -110,7 +111,7 @@ class AnswerService : Service() {
             } finally { directory.deleteRecursively() }
             try { progress(result.phase, result.message, result.answer) } finally {
                 if (wake?.isHeld == true) wake?.release()
-                main.post { AutoAnswer.finish(automatic.id); stopSelf() }
+                main.post { busy = false; stopSelf() }
             }
         }
         return START_NOT_STICKY

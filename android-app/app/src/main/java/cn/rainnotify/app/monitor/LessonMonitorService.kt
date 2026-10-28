@@ -108,7 +108,7 @@ class LessonMonitorService : Service() {
         requestedRevision = SolverSettings.revision(this)
         MonitorState.update(MonitorState.current().copy(lessonId = lessonId,
             lessonName = intent.getStringExtra(LESSON_NAME)))
-        update("正在校验所选课堂并进入，可能记录签到…")
+        update("正在核对扫码后的课堂并获取监听凭据…")
         Diagnostics.record(this, "monitor_manual_start")
         worker.execute {
             try {
@@ -133,7 +133,7 @@ class LessonMonitorService : Service() {
                     Diagnostics.record(this, "monitor_credentials_received")
                     connection = LessonConnection(candidate.client, credentials, observer, clock = SystemClock::elapsedRealtime).also {
                         QuestionRepository.get(this).attach(lessonId, candidate, it,
-                            AnswerProtocol.sha256(cookies.sorted().joinToString("\n")))
+                            AnswerProtocol.sha256(cookies.sorted().joinToString("\n")), MonitorState.current().lessonName.orEmpty())
                         it.networkAvailable(validated && !blocked)
                         it.start()
                     }
@@ -151,7 +151,7 @@ class LessonMonitorService : Service() {
                         finish(failure.userMessage(), scanRequiredLessonId = lessonId)
                     } else {
                         finish((failure?.userMessage() ?: "无法读取本地会话，请重新检查登录。") +
-                            " 已停止；若入课请求已送达，仍可能记录签到。")
+                            " 请先在微信确认已扫码进入此课堂，再返回重试连接。")
                     }
                 }
             }
@@ -167,7 +167,7 @@ class LessonMonitorService : Service() {
             when (state) {
                 ConnectionState.CONNECTING -> update("正在连接课堂，等待服务器确认…")
                 ConnectionState.LISTENING -> {
-                    update("课堂连接已确认，正在监听新题。")
+                    update("课堂已连接，正在监听新题。扫码入课与签到结果以微信为准。")
                     if (pendingAutomatic && MonitorState.automaticRequested) {
                         pendingAutomatic = false
                         if (requestedRevision != SolverSettings.revision(this@LessonMonitorService) ||
@@ -175,7 +175,7 @@ class LessonMonitorService : Service() {
                             "课堂已连接，但 API 或后台条件已变化；请检查后重新开启自动答题。")
                     }
                 }
-                ConnectionState.RETRYING -> update("连接中断，正在重连；中断期间可能漏报。")
+                ConnectionState.RETRYING -> update("连接中断，正在重连；恢复后将核对服务器推送的题目记录。")
                 ConnectionState.OFFLINE -> update("网络不可用或后台联网受限，等待恢复；期间可能漏报。")
                 ConnectionState.DEGRADED -> update("部分课堂消息格式无法识别，可能漏报；请同时留意微信。")
                 ConnectionState.ENDED -> finish("已收到下课消息，课堂监听结束。")
@@ -186,9 +186,13 @@ class LessonMonitorService : Service() {
             if (!alive.get() || MonitorState.stopRequested) return@post
             when (signal) {
                 is LessonSignal.Question -> {
-                    val questionId = QuestionRepository.get(this@LessonMonitorService).capture(signal.reference)
+                    val questionId = QuestionRepository.get(this@LessonMonitorService).capture(signal.reference, signal.recovered)
                     val submitted = MonitorNotifications.question(this@LessonMonitorService, questionId)
-                    AutoAnswer.onQuestion(this@LessonMonitorService, questionId)
+                    if (!signal.closed) AutoAnswer.onQuestion(this@LessonMonitorService, questionId)
+                    else if (AutoAnswer.armed) QuestionRepository.get(this@LessonMonitorService).saveAnswer(
+                        cn.rainnotify.app.answer.AnswerTask(java.util.UUID.randomUUID().toString(), questionId, true,
+                            cn.rainnotify.app.answer.AnswerPhase.FAILED,
+                            "断线期间题目已结束，仅补收归档，未自动提交。", model = SolverSettings.model(this@LessonMonitorService)))
                     val state = MonitorState.current()
                     MonitorState.update(state.copy(questionCount = state.questionCount + 1))
                     if (!submitted) update("收到新题，但通知未能提交；请检查系统通知设置。")

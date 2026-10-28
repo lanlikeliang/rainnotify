@@ -15,6 +15,18 @@ class AnswerTask(val id: String, val questionId: String, val live: Boolean, val 
     val active get() = phase in setOf(AnswerPhase.PREPARING, AnswerPhase.SOLVING, AnswerPhase.CHECKING, AnswerPhase.SUBMITTING)
     fun changed(phase: AnswerPhase, message: String, answer: List<String> = this.answer) =
         AnswerTask(id, questionId, live, phase, message, answer, startedAt, model)
+    fun json(): JSONObject = JSONObject().put("id", id).put("question", questionId).put("live", live)
+        .put("phase", phase.name).put("message", message).put("answer", JSONArray(answer))
+        .put("model", model.id).put("started", startedAt)
+    companion object {
+        fun fromJson(data: JSONObject): AnswerTask {
+            val answers = data.getJSONArray("answer")
+            return AnswerTask(data.getString("id"), data.getString("question"), data.getBoolean("live"),
+                AnswerPhase.valueOf(data.getString("phase")), data.getString("message"),
+                (0 until answers.length()).map { answers.getString(it) }, data.getLong("started"),
+                DeepSeekModel.fromId(data.optString("model")))
+        }
+    }
     override fun toString() = "AnswerTask(redacted)"
 }
 
@@ -31,6 +43,7 @@ object AnswerState {
                 .put("model", value.model.id).put("started", value.startedAt).toString().toByteArray(Charsets.UTF_8))
             storage.finishWrite(stream)
         } catch (e: Exception) { storage.failWrite(stream); throw e }
+        cn.rainnotify.app.question.QuestionRepository.get(context).saveAnswer(value)
         main.post { task.value = value }
     }
     @Synchronized fun restore(context: Context) {
@@ -48,5 +61,6 @@ object AnswerState {
             else -> saved
         }
         task.value = recovered
+        cn.rainnotify.app.question.QuestionRepository.get(context).saveAnswer(recovered)
     }
 }

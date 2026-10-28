@@ -222,6 +222,7 @@ val Amber = Color(0xFF946009)
     }
 }
 fun phaseTitle(phase: AnswerPhase) = when(phase) {
+    AnswerPhase.QUEUED -> "等待处理"
     AnswerPhase.PREPARING -> "正在获取题目"
     AnswerPhase.SOLVING -> "AI 正在作答"
     AnswerPhase.CHECKING -> "正在校验答案"

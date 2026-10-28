@@ -62,6 +62,24 @@ class LessonProtocolTest {
         assertTrue(events.receive("""{"op":"unlockproblem","problem":{"prob":32}}""") is LessonSignal.Question)
     }
 
+    @Test fun reconnectRecoversUnseenProblemsMarksClosedAndNeverReplaysInitialHistory() {
+        val events=LessonEvents("10")
+        events.receive("""{"op":"hello","presentation":"20","timeline":[{"op":"unlockproblem","problem":{"prob":"30"}}]}""")
+        assertTrue(events.takeRecovered().isEmpty())
+        events.disconnected()
+        events.receive("""{"op":"hello","presentation":"20","timeline":[
+            {"op":"unlockproblem","problem":{"prob":"30"}},
+            {"op":"unlockproblem","problem":{"prob":"31"}},
+            {"op":"unlockproblem","problem":{"prob":"32"}},
+            {"op":"problemfinished","prob":"32"}]}""")
+        val recovered=events.takeRecovered()
+        assertEquals(listOf("31","32"),recovered.map { it.reference.problemId })
+        assertTrue(recovered.all { it.recovered })
+        assertFalse(recovered[0].closed); assertTrue(recovered[1].closed)
+        assertEquals(LessonSignal.Duplicate,events.receive("""{"op":"unlockproblem","problem":{"prob":"31"}}"""))
+        assertTrue(events.takeRecovered().isEmpty())
+    }
+
     @Test fun credentialsRequireSuccessAndStayRedacted() {
         val credentials = LessonProtocol.credentials(JSONObject(
             """{"code":0,"msg":"OK","data":{"identityId":42,"lessonToken":"secret-fixture"}}"""), "10")
