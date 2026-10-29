@@ -204,7 +204,7 @@ class MainActivity : ComponentActivity() {
                         }
                         Text("静音、勿扰、通知音量及厂商的横幅设置都可能影响提醒。通知已允许不等于实际有声音。",color=Muted)
                     }
-                    AppPage.BACKGROUND -> Page("后台运行","只需配置雨课堂助手本身",::back) {
+                    AppPage.BACKGROUND -> Page("后台运行","只需配置伞课堂本身",::back) {
                         Panel {
                             InfoRow("系统后台限制",if(s.notification?.backgroundRestricted==true) "已检测到" else "未检测到") { openAppDetails() }
                             InfoRow("系统省电优化",if(s.notification?.batteryExempt==true) "已豁免" else "未豁免，熄屏联网可能受限") { openSystem(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
@@ -213,13 +213,14 @@ class MainActivity : ComponentActivity() {
                         }
                         Text("无需无障碍、关联启动、安装 AI App 或提供锁屏密码。后台运行仍依赖网络与手机省电策略。",color=Muted)
                     }
-                    AppPage.ABOUT -> Page("关于与帮助","雨课堂助手 · "+BuildConfig.VERSION_NAME,::back) {
+                    AppPage.ABOUT -> Page("关于与帮助",getString(R.string.app_name)+" · "+BuildConfig.VERSION_NAME,::back) {
                         Panel {
                             Text("关闭：停止监听与自动处理。\n发题通知：接收、提醒并保存新题。\n自动答题：调用当前 API，校验后提交。",lineHeight=26.sp)
                             Text("自动答题只对本次课堂开启后收到的新题生效。题目与结果按课堂保存在本机，可从题目页导出复习笔记。AI 可能答错；已发出的提交请求无法撤销。",color=Muted)
                             Text("API Key 与雨课堂凭据加密保存在本机；只有题干与原图发往当前模型服务商。",color=Muted)
+                            InfoRow("GitHub 仓库", "lanlikeliang/rainnotify", "打开") { openRepository() }
                             OutlinedButton(onClick={export.launch("rainnotify-diagnostics.jsonl")}) { Text("导出脱敏诊断") }
-                            Text("内部验证版本。长时熄屏、多品牌及真实课堂提交仍需持续验证。",color=Muted,fontSize=12.sp)
+                            Text("长时熄屏、多品牌及真实课堂提交仍需持续验证。",color=Muted,fontSize=12.sp)
                         }
                     }
                 }
@@ -257,6 +258,11 @@ class MainActivity : ComponentActivity() {
         if(deleteConfirmation) AlertDialog(onDismissRequest={deleteConfirmation=false},title={Text("删除本机 API Key？")},text={Text("请先关闭自动答题再删除密钥；发题通知不受影响。")},
             confirmButton={TextButton(onClick={deleteConfirmation=false;home.deleteKey()}){Text("删除")}},dismissButton={TextButton(onClick={deleteConfirmation=false}){Text("取消")}})
     }
+    private fun openRepository() {
+        val url = "https://github.com/lanlikeliang/rainnotify"
+        try { startActivity(Intent(Intent.ACTION_VIEW, url.toUri())) }
+        catch (_: RuntimeException) { toast("无法打开浏览器，请手动访问：" + url) }
+    }
     private fun openWeChat() {
         val launch=packageManager.getLaunchIntentForPackage("com.tencent.mm")
         if(launch==null) toast("请手动打开微信完成扫码，再返回本 App。") else openSystem(launch)
@@ -265,7 +271,7 @@ class MainActivity : ComponentActivity() {
     private fun openChannelSettings() = openSystem(Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
         .putExtra(Settings.EXTRA_APP_PACKAGE,packageName).putExtra(Settings.EXTRA_CHANNEL_ID,ProbeNotifications.QUESTION_CHANNEL))
     private fun openAppDetails() = openSystem(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,"package:$packageName".toUri()))
-    private fun openSystem(intent:Intent) { try { startActivity(intent) } catch(_:RuntimeException){ toast("无法打开该页面，请在系统设置中查找雨课堂助手。") } }
+    private fun openSystem(intent:Intent) { try { startActivity(intent) } catch(_:RuntimeException){ toast("无法打开该页面，请在系统设置中查找伞课堂。") } }
     private fun toast(text:String) = Toast.makeText(this,text,Toast.LENGTH_LONG).show()
     companion object { const val TAB="tab" }
 }

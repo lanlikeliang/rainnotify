@@ -1,10 +1,10 @@
 # v0.1.3 发布验证
 
-发布日期：2026-10-28。versionCode 25，包名 `cn.rainnotify.app`，最低 Android 16（API 36）。
+发布日期：2026-10-29。versionCode 25，包名 `cn.rainnotify.app`，最低 Android 16（API 36）。
 
 ## 代码与构建范围
 
-本版与 `0135c6698cbba9bd09a24e72fc06691a1d0b8604` 的 0.1.3-internal / 24 具有相同业务代码；本次仅更新版本标识和发布文档。正式签名继续使用原证书，允许覆盖升级。每个发布包的提交号、APK SHA-256 和签名摘要记录于 Release 附件，发布前从干净提交重新执行 Release 构建、单元测试和 Lint。
+本版与 `0135c6698cbba9bd09a24e72fc06691a1d0b8604` 的 0.1.3-internal / 24 具有相同课堂处理逻辑；本次仅更新应用名称、关于页仓库链接、版本标识和发布文档。正式签名继续使用原证书，允许覆盖升级。每个发布包的提交号、APK SHA-256 和签名摘要记录于 Release 附件，发布前从干净提交重新执行 Release 构建、单元测试和 Lint。
 
 发布检查以 [GitHub Actions](https://github.com/lanlikeliang/rainnotify/actions) 的实际结果及 Release 的 `validation-summary.json` 为准。CI 只使用合成题和本地模拟服务，不接触真实账号、API Key 或课堂。
 
