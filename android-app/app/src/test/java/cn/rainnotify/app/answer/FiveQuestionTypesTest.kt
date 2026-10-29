@@ -35,7 +35,7 @@ class FiveQuestionTypesTest {
                 server.enqueue(MockResponse().setBody("{\"code\":0}")); server.start(java.net.InetAddress.getByName("127.0.0.1"), 0)
                 val parsed = AnswerProtocol.parse(reply(*answer.toTypedArray()), "task", question)
                 assertEquals(SubmitOutcome.ACCEPTED, RainApi(RainCookieJar(server.url("/")), server.url("/"))
-                    .submitAnswer(ref, question, parsed, 10_000))
+                    .submitAnswer(ref, question, parsed, 8_000))
                 val body = JSONObject(requireNotNull(server.takeRequest(10, java.util.concurrent.TimeUnit.SECONDS)).body.readUtf8())
                 assertEquals(question.type, body.getInt("problemType"))
                 if (expected != null) assertEquals(expected, body.getJSONArray("result").toString())
@@ -78,7 +78,7 @@ class FiveQuestionTypesTest {
         assertTrue(QuestionRef.fromJson(group.json()).groupWork)
         MockWebServer().use { server -> server.start(java.net.InetAddress.getByName("127.0.0.1"), 0)
             assertThrows(AnswerFailure::class.java) {
-                RainApi(RainCookieJar(server.url("/")), server.url("/")).submitAnswer(group, parse(5), listOf("文字"), 10_000)
+                RainApi(RainCookieJar(server.url("/")), server.url("/")).submitAnswer(group, parse(5), listOf("文字"), 8_000)
             }
             assertEquals(0, server.requestCount)
         }
