@@ -11,6 +11,7 @@ data class MonitorUiState(
     val lessonName: String? = null,
     val connection: ConnectionState? = null,
     val established: Boolean = false,
+    val server: cn.rainnotify.app.auth.RainServer? = null,
 )
 
 /** Main-thread state shared by the visible screen and its explicit foreground service. */

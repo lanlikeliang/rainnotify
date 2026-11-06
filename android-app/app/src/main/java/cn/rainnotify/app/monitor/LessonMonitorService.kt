@@ -11,7 +11,6 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
-import cn.rainnotify.app.answer.AnswerProtocol
 import cn.rainnotify.app.answer.AutoAnswer
 import cn.rainnotify.app.answer.SolverSettings
 import cn.rainnotify.app.Diagnostics
@@ -22,6 +21,8 @@ import cn.rainnotify.app.auth.RainApi
 import cn.rainnotify.app.auth.RainCookieJar
 import cn.rainnotify.app.auth.RainFailure
 import cn.rainnotify.app.auth.SessionVault
+import cn.rainnotify.app.auth.RainServer
+import cn.rainnotify.app.auth.ServerSettings
 import cn.rainnotify.app.question.QuestionRepository
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -94,6 +95,11 @@ class LessonMonitorService : Service() {
             return START_NOT_STICKY
         }
         if (begun || !alive.get()) return START_NOT_STICKY
+        val server = RainServer.fromId(intent?.getStringExtra(SERVER))
+        if (server == null || server != ServerSettings.selected(this)) {
+            finish("服务器尚未选择或已改变，请重新选择课堂。")
+            return START_NOT_STICKY
+        }
         val lessonId = intent?.getStringExtra(LESSON_ID)
         if (intent?.action != START || LessonProtocol.id(lessonId) == null) {
             finish("没有选择课堂，监听未启动。")
@@ -106,16 +112,16 @@ class LessonMonitorService : Service() {
         begun = true
         pendingAutomatic = intent.getBooleanExtra(AUTOMATIC, false)
         requestedRevision = SolverSettings.revision(this)
-        MonitorState.update(MonitorState.current().copy(lessonId = lessonId,
+        MonitorState.update(MonitorState.current().copy(lessonId = lessonId, server = server,
             lessonName = intent.getStringExtra(LESSON_NAME)))
         update("正在核对扫码后的课堂并获取监听凭据…")
-        Diagnostics.record(this, "monitor_manual_start")
+        Diagnostics.record(this, "monitor_manual_start", mapOf("rain_server" to server.id))
         worker.execute {
             try {
-                val cookies = SessionVault(this).read()
+                val cookies = SessionVault(this, server).read()
                 if (cookies.isEmpty()) throw RainFailure(FailureReason.SESSION_EXPIRED, "monitor_session")
-                val candidate = RainApi(RainCookieJar().apply { restore(cookies) }, report = { kind, fields ->
-                    if (alive.get()) Diagnostics.record(this, kind, fields)
+                val candidate = RainApi(server, RainCookieJar(server.origin).apply { restore(cookies) }, report = { kind, fields ->
+                    if (alive.get()) Diagnostics.record(this, kind, fields + ("rain_server" to server.id))
                 })
                 api = candidate
                 if (!alive.get() || MonitorState.stopRequested) { candidate.cancel(); return@execute }
@@ -131,9 +137,9 @@ class LessonMonitorService : Service() {
                 main.post {
                     if (!alive.get() || MonitorState.stopRequested) return@post
                     Diagnostics.record(this, "monitor_credentials_received")
-                    connection = LessonConnection(candidate.client, credentials, observer, clock = SystemClock::elapsedRealtime).also {
+                    connection = LessonConnection(candidate.client, credentials, observer, url = server.socket, clock = SystemClock::elapsedRealtime).also {
                         QuestionRepository.get(this).attach(lessonId, candidate, it,
-                            AnswerProtocol.sha256(cookies.sorted().joinToString("\n")), MonitorState.current().lessonName.orEmpty())
+                            server.accountScope(cookies), MonitorState.current().lessonName.orEmpty())
                         it.networkAvailable(validated && !blocked)
                         it.start()
                     }
@@ -226,7 +232,7 @@ class LessonMonitorService : Service() {
 
     private fun finish(message: String, scanRequiredLessonId: String? = null) {
         if (!alive.compareAndSet(true, false)) return
-        AutoAnswer.disarm(this)
+        AutoAnswer.disarm(this, cancelRunning = false)
         QuestionRepository.get(this).detach(api)
         connection?.close()
         api?.cancel()
@@ -236,7 +242,7 @@ class LessonMonitorService : Service() {
     }
 
     override fun onDestroy() {
-        AutoAnswer.disarm(this)
+        AutoAnswer.disarm(this, cancelRunning = false)
         alive.set(false)
         QuestionRepository.get(this).detach(api)
         main.removeCallbacksAndMessages(null)
@@ -257,6 +263,7 @@ class LessonMonitorService : Service() {
     companion object {
         const val START = "cn.rainnotify.app.START_LESSON"
         const val STOP = "cn.rainnotify.app.STOP_LESSON"
+        const val SERVER = "rain_server"
         const val LESSON_ID = "lesson_id"
         const val LESSON_NAME = "lesson_name"
         const val AUTOMATIC = "automatic_mode"

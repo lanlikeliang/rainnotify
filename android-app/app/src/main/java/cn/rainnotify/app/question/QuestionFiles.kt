@@ -1,5 +1,6 @@
 package cn.rainnotify.app.question
 
+import cn.rainnotify.app.auth.RainServer
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -21,16 +22,17 @@ class QuestionRecord(
     val imageErrors: Map<Int, String> = emptyMap(),
     val offline: Boolean = false,
     val lessonName: String = "", val accountScope: String = "", val recovered: Boolean = false,
+    val server: RainServer = RainServer.ORDINARY,
 ) {
-    val classroomKey get() = reference.lessonId
+    val classroomKey get() = server.classroomKey(reference.lessonId)
     override fun toString() = "QuestionRecord(redacted)"
     fun changed(content: QuestionContent? = this.content, message: String = this.message,
         loading: Boolean = this.loading, imageErrors: Map<Int, String> = this.imageErrors) =
-        QuestionRecord(id, reference, receivedAt, content, message, loading, imageErrors, offline, lessonName, accountScope, recovered)
+        QuestionRecord(id, reference, receivedAt, content, message, loading, imageErrors, offline, lessonName, accountScope, recovered, server)
 
     fun json(): JSONObject = JSONObject().put("id", id).put("ref", reference.json()).put("received", receivedAt)
         .put("content", content?.json()).put("message", message).put("loading", loading).put("offline", offline)
-        .put("lesson_name", lessonName).put("account_scope", accountScope).put("recovered", recovered)
+        .put("lesson_name", lessonName).put("account_scope", accountScope).put("recovered", recovered).put("server", server.id)
         .put("image_errors", JSONArray(imageErrors.map { JSONObject().put("index", it.key).put("message", it.value) }))
 
     companion object {
@@ -41,7 +43,9 @@ class QuestionRecord(
                 value.getString("message"), value.getBoolean("loading"),
                 (0 until errors.length()).associate { i -> errors.getJSONObject(i).let {
                     it.getInt("index") to it.getString("message")
-                } }, value.optBoolean("offline", false), value.optString("lesson_name"), value.optString("account_scope"), value.optBoolean("recovered"))
+                } }, value.optBoolean("offline", false), value.optString("lesson_name"), value.optString("account_scope"), value.optBoolean("recovered"),
+                if (!value.has("server")) RainServer.ORDINARY else
+                    requireNotNull(RainServer.fromId(value.getString("server"))) { "Unknown archive server" })
         }
     }
 }
@@ -92,6 +96,21 @@ class QuestionFiles(private val root: File, private val maxRecords: Int = Int.MA
         return File(folder(id), "image-" + index + ".bin").takeIf { it.isFile }
     }
 
+
+    @Synchronized fun saveAnswerImages(id: String, sources: List<File>) {
+        require(sources.size <= QuestionProtocol.MAX_ASSETS)
+        check(record(id) != null)
+        sources.forEachIndexed { index, source ->
+            require(source.length() in 1..QuestionImages.MAX_BYTES.toLong())
+            atomicWrite(File(folder(id), "answer-image-$index.bin"), source.readBytes())
+        }
+    }
+
+    @Synchronized fun answerImage(id: String, index: Int): File? {
+        if (!validId(id) || index !in 0 until QuestionProtocol.MAX_ASSETS) return null
+        return File(folder(id), "answer-image-$index.bin").takeIf { it.isFile } ?: image(id, index)
+    }
+
     @Synchronized fun saveAnswer(value: AnswerTask): Boolean {
         val dir = folder(value.questionId)
         if (!File(dir, "question.json").isFile) return false
@@ -102,7 +121,7 @@ class QuestionFiles(private val root: File, private val maxRecords: Int = Int.MA
         .filter { it.isDirectory && validId(it.name) }.mapNotNull { directory ->
             try {
                 val file = File(directory, "answer.json")
-                if (!file.isFile || file.length() > 65_536) null else AnswerTask.fromJson(JSONObject(file.readText()))
+                if (!file.isFile || file.length() > 3 * 1024 * 1024) null else AnswerTask.fromJson(JSONObject(file.readText()))
                     .takeIf { it.questionId == directory.name }?.let { directory.name to it }
             } catch (_: Exception) { null }
         }.toMap()

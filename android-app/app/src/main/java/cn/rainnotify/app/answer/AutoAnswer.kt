@@ -29,7 +29,7 @@ object AutoAnswer {
         if (cn.rainnotify.app.monitor.MonitorState.stopRequested ||
             cn.rainnotify.app.monitor.MonitorState.current().connection != cn.rainnotify.app.monitor.ConnectionState.LISTENING) return false
         val current = QuestionRepository.get(context).currentBinding() ?: return false
-        if (AiReadiness.issue(context) != null || AnswerState.task.value?.active == true || ticket != null) return false
+        if (AiReadiness.issue(context) != null || AnswerService.running || AnswerState.task.value?.active == true || ticket != null) return false
         this.context = context.applicationContext as Application
         binding = current
         pending.clear()
@@ -37,7 +37,7 @@ object AutoAnswer {
         status.value = "自动答题已开启，仅处理本次课堂之后收到的新题。"
         return true
     }
-    fun disarm(context: Context) {
+    fun disarm(context: Context, cancelRunning: Boolean = true) {
         cn.rainnotify.app.monitor.MonitorState.automaticRequested = false
         val running = claimed && ticket != null
         pending.clear().forEach { recordSkipped(context, it, AnswerPhase.CANCELLED, "已关闭自动答题，未继续处理。") }
@@ -45,7 +45,7 @@ object AutoAnswer {
         main.removeCallbacksAndMessages(null)
         releaseWake()
         status.value = ""
-        if (running) context.startService(Intent(context, AnswerService::class.java).setAction(AnswerService.STOP))
+        if (running && cancelRunning) context.startService(Intent(context, AnswerService::class.java).setAction(AnswerService.STOP))
     }
     fun block(context: Context, message: String) {
         disarm(context)
@@ -59,7 +59,7 @@ object AutoAnswer {
         val entry = PendingAnswers.Entry(UUID.randomUUID().toString(), id, SystemClock.elapsedRealtime())
         if (!pending.offer(entry)) return
         holdWake(context)
-        recordSkipped(context, entry, AnswerPhase.QUEUED, "已接收，等待前题完成；开始前会核对剩余时间。")
+        recordSkipped(context, entry, AnswerPhase.QUEUED, "已接收，等待前题完成后生成参考答案。")
         drain()
     }
     private fun recordSkipped(context: Context, entry: PendingAnswers.Entry, phase: AnswerPhase, message: String) {
@@ -89,22 +89,18 @@ object AutoAnswer {
     private fun drain() {
         val context = context ?: return
         if (!armed || ticket != null) return
-        if (AnswerState.task.value?.active == true) { scheduleDrain(); return }
+        if (AnswerService.running || AnswerState.task.value?.active == true) { scheduleDrain(); return }
         if (cn.rainnotify.app.monitor.MonitorState.current().connection != cn.rainnotify.app.monitor.ConnectionState.LISTENING) {
             scheduleDrain(); return
         }
         AiReadiness.issue(context)?.let { block(context, it); return }
         while (true) {
             val entry = pending.poll() ?: run { releaseWake(); return }
-            if (SystemClock.elapsedRealtime() - entry.received >= 73_000) {
-                recordSkipped(context, entry, AnswerPhase.FAILED, "排队后剩余时间不足，未提交；请在微信查看。")
-                continue
-            }
             if (QuestionRepository.get(context).activeBinding(entry.question) !== binding) {
                 recordSkipped(context, entry, AnswerPhase.CANCELLED, "课堂已切换，未提交。")
                 continue
             }
-            val token = policy.offer(entry.taskId, entry.question, policy.session, false, entry.received) ?: continue
+            val token = policy.offer(entry.taskId, entry.question, policy.session, false) ?: continue
             claimed = false
             status.value = "正在通过 DeepSeek API 作答，无需解锁。"
             holdWake(context)
@@ -123,7 +119,7 @@ object AutoAnswer {
                     recordSkipped(context, entry, AnswerPhase.FAILED, "本题自动流程未启动，已超时。")
                     finish(token.id)
                 }
-            } }, (85_000 - (SystemClock.elapsedRealtime() - token.received)).coerceAtLeast(1))
+            } }, 85_000)
             return
         }
     }

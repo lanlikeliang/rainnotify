@@ -89,7 +89,6 @@ class AnswerApiTest {
                         .put("problem", problem))))
             }
             val captured = QuestionProtocol.parse(ref, presentation("captured"))
-            server.enqueue(MockResponse().setBody(presentation("before-ai").toString()))
             server.enqueue(MockResponse().setBody(presentation("before-submit").toString()))
             server.enqueue(MockResponse().setBody("{\"code\":0}"))
             server.start()
@@ -105,8 +104,8 @@ class AnswerApiTest {
                 RunControl(), gateway, "b".repeat(64),
                 { JSONObject().put("task", "nonce").put("answer", JSONArray(labels)).put("unable", false).toString() }, { _, _ -> })
             assertEquals(AnswerPhase.SUBMITTED, result.phase)
-            assertEquals(3, server.requestCount)
-            repeat(2) {
+            assertEquals(2, server.requestCount)
+            run {
                 val request = server.takeRequest(1, TimeUnit.SECONDS)!!
                 assertEquals("GET", request.method)
                 assertEquals("/api/v3/lesson/presentation/fetch?presentation_id=20", request.path)

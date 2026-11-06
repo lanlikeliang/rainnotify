@@ -1,6 +1,7 @@
 package cn.rainnotify.app.question
 
 data class StudyClassroom(val key: String, val title: String, val records: List<QuestionRecord>) {
+    val server get() = records.first().server
     val firstReceived get() = records.minOf { it.receivedAt }
 }
 object StudyClassrooms {

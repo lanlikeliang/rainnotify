@@ -24,8 +24,12 @@ import java.util.concurrent.TimeUnit
 class RainApi(
     val cookies: RainCookieJar,
     private val origin: HttpUrl = RainProtocol.ORIGIN.toHttpUrl(),
+    val server: RainServer = RainServer.fromHost(origin.host) ?: RainServer.ORDINARY,
     private val report: (String, Map<String, Any>) -> Unit = { _, _ -> },
 ) {
+    constructor(server: RainServer, cookies: RainCookieJar = RainCookieJar(server.origin),
+        report: (String, Map<String, Any>) -> Unit = { _, _ -> }) : this(cookies, server.origin, server, report)
+
     // Official v3 client reuses Set-Auth from prior responses, only in this client session.
     @Volatile private var authorization: String? = null
     val client: OkHttpClient = OkHttpClient.Builder().cookieJar(cookies)
@@ -136,7 +140,7 @@ class RainApi(
     }
 
     fun image(url: HttpUrl): ByteArray {
-        val safeUrl = RainProtocol.qrUrl(url.toString())
+        val safeUrl = RainProtocol.qrUrl(url.toString(), server)
         // A separate client has no login cookie jar or request headers.
         val imageClient = client.newBuilder().cookieJar(okhttp3.CookieJar.NO_COOKIES).build()
         return executeBytes(imageClient, Request.Builder().url(safeUrl).build(), "qr_image")

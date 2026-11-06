@@ -7,6 +7,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import cn.rainnotify.app.Diagnostics
+import cn.rainnotify.app.answer.AnswerState
+import cn.rainnotify.app.answer.AutoAnswer
+import cn.rainnotify.app.monitor.MonitorState
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
@@ -25,13 +28,14 @@ data class LoginUiState(
     val qr: Bitmap? = null,
     val qrSaved: Boolean = false,
     val sessionExpired: Boolean = false,
+    val server: RainServer? = null,
 )
 
 class RainLoginViewModel(application: Application) : AndroidViewModel(application) {
     private val gate = AttemptGate()
     private val worker = Executors.newSingleThreadExecutor()
     private val timer = Executors.newSingleThreadScheduledExecutor()
-    private val vault = SessionVault(application)
+    @Volatile private var selectedServer = ServerSettings.selected(application)
     private val gallery = QrGallery(application)
     private val mutableState = MutableLiveData(LoginUiState())
     val state: LiveData<LoginUiState> = mutableState
@@ -45,8 +49,8 @@ class RainLoginViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun publish(token: Long, value: LoginUiState) {
         gate.runIfCurrent(token) {
-            latest = value
-            mutableState.postValue(value)
+            latest = value.copy(server = selectedServer)
+            mutableState.postValue(latest)
         }
     }
 
@@ -65,9 +69,9 @@ class RainLoginViewModel(application: Application) : AndroidViewModel(applicatio
         api?.cancel()
     }
 
-    private fun createApi(token: Long, cookies: RainCookieJar): RainApi =
-        RainApi(cookies, report = { kind, fields ->
-            if (gate.isCurrent(token)) Diagnostics.record(getApplication(), kind, fields)
+    private fun createApi(token: Long, server: RainServer, cookies: RainCookieJar): RainApi =
+        RainApi(server, cookies, report = { kind, fields ->
+            if (gate.isCurrent(token)) Diagnostics.record(getApplication(), kind, fields + ("rain_server" to server.id))
         }).also { candidate ->
             if (!gate.runIfCurrent(token) { api = candidate }) candidate.cancel()
         }
@@ -78,38 +82,61 @@ class RainLoginViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun selectServer(server: RainServer): Boolean {
+        if (selectedServer == server) return false
+        if (!ServerSwitchPolicy.allowed(MonitorState.current().active, MonitorState.automaticRequested,
+                cn.rainnotify.app.answer.AnswerService.running || AnswerState.task.value?.active == true, AutoAnswer.ticket != null)) {
+            publish(gate.current(), latest.copy(message = "请先关闭课堂监听，并等待当前作答结束，再切换服务器。"))
+            return false
+        }
+        gate.begin() // Invalidate old QR callbacks before changing the credential destination.
+        stopNetwork()
+        selectedServer = server
+        ServerSettings.select(getApplication(), server)
+        Diagnostics.record(getApplication(), "server_selected", mapOf("rain_server" to server.id))
+        refresh()
+        return true
+    }
+
     fun refresh() {
+        val server = selectedServer
+        if (server == null) {
+            val token = begin(LoginUiState(message = "请先选择学校使用的服务器，再登录账号。", busy = false))
+            worker.execute { if (gate.isCurrent(token)) cleanupQr() }
+            return
+        }
         val token = begin(LoginUiState(message = "正在校验登录并读取当前课堂…", hasSession = latest.hasSession))
         worker.execute {
             cleanupQr()
             if (!gate.isCurrent(token)) return@execute
             try {
-                val cookies = vault.read()
+                val cookies = SessionVault(getApplication(), server).read()
                 if (cookies.isEmpty()) {
-                    publish(token, LoginUiState(message = "尚未登录。点击下方按钮生成雨课堂授权二维码。", busy = false))
+                    publish(token, LoginUiState(message = "尚未登录${server.label}。点击下方按钮生成授权二维码。", busy = false))
                     return@execute
                 }
                 publish(token, latest.copy(hasSession = true))
-                val jar = RainCookieJar().apply { restore(cookies) }
-                val client = createApi(token, jar)
+                val jar = RainCookieJar(server.origin).apply { restore(cookies) }
+                val client = createApi(token, server, jar)
                 completeSession(token, client, false)
             } catch (error: Exception) { fail(token, safeFailure(error, "session_restore")) }
         }
     }
 
     fun startLogin() {
-        val token = begin(LoginUiState(message = "正在连接普通版雨课堂，获取授权二维码…"))
+        val server = selectedServer ?: run { refresh(); return }
+        val token = begin(LoginUiState(message = "正在连接${server.label}，获取授权二维码…"))
         worker.execute {
             cleanupQr()
             if (!gate.isCurrent(token)) return@execute
-            val client = createApi(token, RainCookieJar())
+            val client = createApi(token, server, RainCookieJar(server.origin))
             val grantClaimed = AtomicBoolean(false)
             val qrClaimed = AtomicBoolean(false)
             gate.runIfCurrent(token) {
                 timeout = timer.schedule({
                     fail(token, RainFailure(FailureReason.TIMEOUT, "login_socket"))
                 }, 120, TimeUnit.SECONDS)
-                socket = client.client.newWebSocket(Request.Builder().url(RainProtocol.LOGIN_SOCKET).build(),
+                socket = client.client.newWebSocket(Request.Builder().url(server.socket).build(),
                     object : RainSocketListener() {
                         override fun onOpen(webSocket: WebSocket, response: Response) {
                             if (!gate.isCurrent(token)) { webSocket.cancel(); return }
@@ -120,7 +147,7 @@ class RainLoginViewModel(application: Application) : AndroidViewModel(applicatio
                         override fun onMessage(webSocket: WebSocket, text: String) {
                             if (!gate.isCurrent(token) || grantClaimed.get()) return
                             try {
-                                when (val message = RainProtocol.loginMessage(text)) {
+                                when (val message = RainProtocol.loginMessage(text, server)) {
                                     is LoginMessage.Qr -> if (qrClaimed.compareAndSet(false, true)) {
                                         Diagnostics.record(getApplication(), "login_message", mapOf("login_message_kind" to "qr"))
                                         worker.execute {
@@ -181,7 +208,7 @@ class RainLoginViewModel(application: Application) : AndroidViewModel(applicatio
         if (!gate.isCurrent(token)) return
         client.validateSession()
         if (!gate.runIfCurrent(token) {
-                vault.write(client.cookies.snapshot())
+                SessionVault(getApplication(), client.server).write(client.cookies.snapshot())
                 Diagnostics.record(getApplication(), if (newLogin) "login_verified" else "session_restored",
                     mapOf("authenticated" to true, "session_saved" to true))
                 publish(token, LoginUiState(message = "登录有效，正在读取当前课堂…",
@@ -193,7 +220,7 @@ class RainLoginViewModel(application: Application) : AndroidViewModel(applicatio
         publish(token, latest.copy(displayName = name))
         val lessons = client.classrooms()
         gate.runIfCurrent(token) {
-            vault.write(client.cookies.snapshot())
+            SessionVault(getApplication(), client.server).write(client.cookies.snapshot())
             Diagnostics.record(getApplication(), "classrooms_loaded", mapOf("lesson_count" to lessons.size))
             publish(token, LoginUiState(
                 message = if (lessons.isEmpty()) "登录有效，当前没有正在上课的课堂。可在上课时刷新。"
@@ -224,11 +251,14 @@ class RainLoginViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun logout() {
+        val server = selectedServer ?: return
         val token = begin(LoginUiState(message = "正在清除本 App 登录…"))
         worker.execute {
             try {
+                // Logout targets the captured server even if the user switches while this worker is queued.
+                // This worker also serializes login persistence, so no later login can be erased here.
+                SessionVault(getApplication(), server).clear()
                 gate.runIfCurrent(token) {
-                    vault.clear()
                     cleanupQr()
                     api = null
                     Diagnostics.record(getApplication(), "session_cleared")

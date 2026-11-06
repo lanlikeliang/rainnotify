@@ -14,10 +14,10 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-class SessionVault(context: Context) {
-    private val file = AtomicFile(File(context.noBackupFilesDir, "rain-session-v1.enc"))
-    private val alias = "rainnotify.session.v1"
-    private val aad = "RainNotifySession:v1".toByteArray(Charsets.UTF_8)
+class SessionVault(context: Context, server: RainServer = RainServer.ORDINARY) {
+    private val file = AtomicFile(File(context.noBackupFilesDir, server.vaultFile))
+    private val alias = server.vaultAlias
+    private val aad = server.vaultAad.toByteArray(Charsets.UTF_8)
 
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }

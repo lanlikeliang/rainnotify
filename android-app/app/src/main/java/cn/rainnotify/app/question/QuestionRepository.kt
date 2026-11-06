@@ -38,6 +38,8 @@ class QuestionRepository private constructor(context: Context) {
     val answers = MutableLiveData<Map<String, AnswerTask>>(emptyMap())
     private val pendingAnswers = ConcurrentHashMap<String, AnswerTask>()
     @Volatile private var latestId: String? = null
+    fun saveAnswerImages(id: String, sources: List<File>) = files.saveAnswerImages(id, sources)
+    fun answerImage(id: String, index: Int) = files.answerImage(id, index)
     fun hideLatest() { latestId = null; latest.value = null }
     val liveLesson = MutableLiveData<String?>(null)
 
@@ -71,13 +73,13 @@ class QuestionRepository private constructor(context: Context) {
 
     fun capture(reference: QuestionRef, recovered: Boolean = false): String {
         val id = UUID.randomUUID().toString()
-        val active = binding
-        val record = QuestionRecord(id, reference, System.currentTimeMillis(), lessonName = active?.lessonName.orEmpty(),
-            accountScope = active?.accountScope.orEmpty(), recovered = recovered)
+        val active = requireNotNull(binding) { "No classroom binding" }
+        val record = QuestionRecord(id, reference, System.currentTimeMillis(), lessonName = active.lessonName,
+            accountScope = active.accountScope, recovered = recovered, server = active.api.server)
         latestId = id
         latest.value = record
         val version = generation.get()
-        if (active != null) liveRecords[id] = active
+        liveRecords[id] = active
         pending.add(id)
         worker.execute {
             try {
@@ -110,7 +112,7 @@ class QuestionRepository private constructor(context: Context) {
     private fun load(original: QuestionRecord, active: Binding?, version: Long) {
         var record = original
         fun current() = generation.get() == version && binding === active &&
-            active != null && active.lesson == original.reference.lessonId
+            active != null && active.lesson == original.reference.lessonId && active.api.server == original.server
         fun save() {
             if (generation.get() == version) { files.write(record); publish() }
         }

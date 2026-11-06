@@ -33,9 +33,10 @@ class QuestionComparisonProbeActivity : ComponentActivity() {
                     if (requested != null) it.id == requested else System.currentTimeMillis() - it.receivedAt in 0..86_400_000
                 }.take(3)
                 require(records.isNotEmpty())
-                val cookies = SessionVault(context).read()
+                val server = cn.rainnotify.app.auth.ServerSettings.selected(context) ?: error("Select a server first")
+                val cookies = SessionVault(context, server).read()
                 check(cookies.isNotEmpty())
-                val reader = RainApi(RainCookieJar().apply { restore(cookies) }).also { api = it }
+                val reader = RainApi(server, RainCookieJar(server.origin).apply { restore(cookies) }).also { api = it }
                 reader.validateSession()
                 for (record in records) {
                     val item = JSONObject().put("record", record.id)
@@ -51,8 +52,7 @@ class QuestionComparisonProbeActivity : ComponentActivity() {
                             .put("notes_equal", before.notes == after.notes)
                             .put("asset_count", after.assets.size)
                             .put("asset_urls_equal", before.assets.map { it.url } == after.assets.map { it.url })
-                            .put("asset_resources_equal", before.assets.map { QuestionIdentity.imageReference(it.url) } ==
-                                after.assets.map { QuestionIdentity.imageReference(it.url) })
+                            .put("text_identity_equal", QuestionIdentity.differences(before, after).isEmpty())
                         val cached = files.image(record.id, 0)
                         if (cached != null && after.assets.isNotEmpty()) {
                             try {

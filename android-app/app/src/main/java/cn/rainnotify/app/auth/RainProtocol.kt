@@ -62,7 +62,7 @@ object RainProtocol {
         catch (_: Exception) { throw RainFailure(FailureReason.RESPONSE_FORMAT, stage) }
     }
 
-    fun loginMessage(text: String): LoginMessage {
+    fun loginMessage(text: String, server: RainServer = RainServer.ORDINARY): LoginMessage {
         val value = parseObject(text, "login_socket")
         if (value.has("code") && value.opt("code")?.toString() != "0") {
             throw RainFailure(FailureReason.RESPONSE_REJECTED, "login_socket",
@@ -79,13 +79,14 @@ object RainProtocol {
             return LoginMessage.Grant(id, auth)
         }
         val ticket = value.opt("ticket") as? String
-        return if (!ticket.isNullOrBlank()) LoginMessage.Qr(qrUrl(ticket)) else LoginMessage.Waiting
+        return if (!ticket.isNullOrBlank()) LoginMessage.Qr(qrUrl(ticket, server)) else LoginMessage.Waiting
     }
 
-    fun qrUrl(ticket: String): HttpUrl {
+    fun qrUrl(ticket: String, server: RainServer = RainServer.ORDINARY): HttpUrl {
         val candidate = ticket.toHttpUrlOrNull()
             ?: throw RainFailure(FailureReason.QR_ORIGIN, "qr_image")
-        val allowed = setOf("www.yuketang.cn", "yuketang.cn", "mp.weixin.qq.com")
+        val allowed = setOf(server.host, "mp.weixin.qq.com") +
+            if (server == RainServer.ORDINARY) setOf("yuketang.cn") else emptySet()
         if (candidate.host !in allowed || candidate.username.isNotEmpty()
             || candidate.password.isNotEmpty() || candidate.port !in setOf(80, 443)) {
             throw RainFailure(FailureReason.QR_ORIGIN, "qr_image")

@@ -28,11 +28,17 @@ class QuestionImages {
         .followRedirects(false).followSslRedirects(false).connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS).callTimeout(20, TimeUnit.SECONDS).build()
 
-    fun fetch(raw: String): ByteArray {
+    fun fetch(raw: String, timeoutMs: Long = 20_000): ByteArray {
+        require(timeoutMs > 0)
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
         var url = QuestionImagePolicy.url(raw)
         try {
             repeat(4) {
-                client.newCall(Request.Builder().url(url).build()).execute().use { response ->
+                val remaining = deadline - System.nanoTime()
+                if (remaining <= 0) throw IOException("image timeout")
+                val call = client.newCall(Request.Builder().url(url).build())
+                call.timeout().timeout(remaining, TimeUnit.NANOSECONDS)
+                call.execute().use { response ->
                     if (response.code in listOf(301, 302, 303, 307, 308)) {
                         val location = response.header("Location") ?: invalidContent()
                         url = QuestionImagePolicy.url(url.resolve(location)?.toString() ?: location)

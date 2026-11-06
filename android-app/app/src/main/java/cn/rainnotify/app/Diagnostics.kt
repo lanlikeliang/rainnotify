@@ -21,13 +21,13 @@ object Diagnostics {
         "runtime_notification_permission", "channel_exists", "vibration_permission",
         "wake_lock_permission", "background_restricted", "channel_lockscreen_visibility",
         "timer_uptime_lateness_ms", "settings_target", "remaining_ms",
-        "protocol_stage", "http_status", "business_code", "lesson_count",
+        "protocol_stage", "http_status", "business_code", "lesson_count", "rain_server",
         "authenticated", "session_saved", "login_message_kind",
         "transport_error", "websocket_close_code",
         "network_available",
         "request_has_authorization", "request_has_csrf", "response_has_authorization", "response_json",
         "question_type", "option_count", "asset_count", "loaded_asset_count", "body_present",
-        "comparison_stage", "changed_fields", "asset_url_changed", "content_same",
+        "comparison_stage", "changed_fields", "asset_url_changed", "content_same", "image_comparison",
     )
 
     @Synchronized

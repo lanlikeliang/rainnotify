@@ -26,6 +26,7 @@ object StudyExport {
         html("<title>" + escape(title) + " · 复习笔记</title>")
         html("<style>body{font:17px/1.75 system-ui,sans-serif;color:#182d34;background:#f5f7f8;margin:0}main{max-width:860px;margin:auto;padding:28px 20px}article{background:white;padding:24px;border-radius:16px;margin:20px 0}h1{font-size:28px}h2{font-size:20px}small,figcaption{color:#63767c}img{max-width:100%;height:auto}figure{margin:16px 0}details{border-top:1px solid #ddd;padding-top:12px;margin-top:20px}summary{cursor:pointer;color:#087f76}p{white-space:pre-wrap;overflow-wrap:anywhere}.missing{color:#946009}@media print{body{background:white}main{max-width:none;padding:0}article{border:1px solid #ddd;break-inside:avoid}details{display:block}details> *{display:block!important}summary{display:none!important}}</style><main>")
         html("<h1>" + escape(title) + "</h1><p>" + date.format(Date(ordered.first().receivedAt)) + " · 共 " + ordered.size + " 题</p>")
+        html("<p>服务器：" + escape(ordered.first().server.label) + "</p>")
         html("<small>时间为本机收到题目的时间，补收题会标注。点击答案栏可折叠自测；可用浏览器打印或保存为 PDF。AI 答案仅供参考，不代表教师标准答案。</small>")
         ordered.forEachIndexed { n, record ->
             val q = record.content

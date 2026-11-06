@@ -32,7 +32,6 @@ class FiveTypePipelineTest {
             val captured = QuestionProtocol.parse(ref, presentation())
             val expected = when(type) { 1 -> listOf("B"); 2, 3 -> listOf("A", "B"); 4 -> listOf("first", "first"); else -> listOf("A brief synthetic answer.") }
             rain.enqueue(MockResponse().setBody(presentation().toString()))
-            rain.enqueue(MockResponse().setBody(presentation().toString()))
             rain.enqueue(MockResponse().setBody("{\"code\":0}"))
             val answer = JSONObject().put("task", task).put("answer", JSONArray(expected)).put("unable", false)
             model.enqueue(MockResponse().setBody(JSONObject().put("choices", JSONArray().put(JSONObject()
@@ -53,15 +52,17 @@ class FiveTypePipelineTest {
                     AnswerProtocol.prompt(captured, task), emptyList(), budget, control) }, { _, _ -> })
             val outcome = run()
             assertEquals("type $type: ${outcome.message}", AnswerPhase.SUBMITTED, outcome.phase)
-            assertEquals(3, rain.requestCount); assertEquals(1, model.requestCount)
-            repeat(2) { assertEquals("GET", rain.takeRequest(1, TimeUnit.SECONDS)!!.method) }
+            assertEquals(2, rain.requestCount); assertEquals(1, model.requestCount)
+            assertEquals("GET", rain.takeRequest(1, TimeUnit.SECONDS)!!.method)
             val post = rain.takeRequest(1, TimeUnit.SECONDS)!!
             val body = JSONObject(post.body.readUtf8())
             assertEquals("POST", post.method); assertEquals(type, body.getInt("problemType"))
             if (type == 5) assertEquals(expected.single(), body.getJSONObject("result").getString("content"))
             else assertEquals(JSONArray(expected).toString(), body.getJSONArray("result").toString())
+            model.enqueue(MockResponse().setBody(JSONObject().put("choices", JSONArray().put(JSONObject()
+                .put("finish_reason", "stop").put("message", JSONObject().put("content", answer.toString())))).toString()))
             assertEquals(AnswerPhase.FAILED, run().phase)
-            assertEquals(3, rain.requestCount); assertEquals(1, model.requestCount)
+            assertEquals(2, rain.requestCount); assertEquals(2, model.requestCount)
         } }
     }
 }

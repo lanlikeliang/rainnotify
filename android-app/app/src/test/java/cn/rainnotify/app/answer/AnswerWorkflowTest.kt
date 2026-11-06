@@ -81,7 +81,7 @@ class AnswerWorkflowTest {
     @Test fun successfulLiveFlowRefreshesAfterSolveAndSendsOnce() {
         val f = Fixture()
         assertEquals(AnswerPhase.SUBMITTED, f.run { budget -> assertEquals(60_000L, budget); f.now += 20_000; reply() }.phase)
-        assertEquals(2, f.reads); assertEquals(1, f.posts)
+        assertEquals(1, f.reads); assertEquals(1, f.posts)
         assertEquals(AnswerPhase.FAILED, f.run().phase)
         assertEquals(1, f.posts)
     }
@@ -94,15 +94,14 @@ class AnswerWorkflowTest {
         assertEquals(AnswerPhase.SUBMITTED, f.run {
             f.now += 20_000; f.content = signedQuestion("before-submit"); reply()
         }.phase)
-        assertEquals(listOf("before_solve" to emptyList<String>(), "before_submit" to emptyList<String>()), f.comparisons)
-        assertEquals(2, f.reads); assertEquals(1, f.posts)
+        assertEquals(listOf("before_submit" to emptyList<String>()), f.comparisons)
+        assertEquals(1, f.reads); assertEquals(1, f.posts)
         assertEquals(AnswerPhase.FAILED, f.run().phase)
         assertEquals(1, f.posts)
     }
 
-    @Test fun changedImageOrReorderedOptionsStillBlocksBothValidationStages() {
+    @Test fun changedOptionsBlockAutomaticSubmissionAfterReferenceGeneration() {
         for (afterSolve in listOf(false, true)) for (changed in listOf(
-            signedQuestion("new", path = "replacement.png"),
             signedQuestion("new", options = question().options.reversed()))) {
             val f = Fixture(signedQuestion("old"))
             var solved = false
@@ -110,7 +109,7 @@ class AnswerWorkflowTest {
             assertEquals(AnswerPhase.FAILED, f.run {
                 solved = true; f.content = changed; reply()
             }.phase)
-            assertEquals(afterSolve, solved)
+            assertTrue(solved)
             assertEquals(0, f.posts)
             assertFalse(f.journal.used(key))
             assertFalse(f.comparisons.last().second.isEmpty())
@@ -132,22 +131,22 @@ class AnswerWorkflowTest {
         assertEquals(AnswerPhase.FAILED, f.run().phase)
         assertEquals(1, f.posts)
     }
-    @Test fun alreadyAnsweredOrUnknownPresenceStopsBeforeSendingAnythingToAi() {
+    @Test fun alreadyAnsweredOrUnknownPresenceStillGeneratesReference() {
         for (flag in listOf(true, null)) {
             val f = Fixture().apply { answered = flag }
             var solved = false
             f.run { solved = true; reply() }
-            assertFalse(solved); assertEquals(0, f.posts)
+            assertTrue(solved); assertEquals(0, f.posts)
         }
     }
     @Test fun unsupportedAnswerAndLowTimeNeverSubmit() {
         val f = Fixture()
         assertEquals(AnswerPhase.FAILED, f.run { reply("[\"Z\"]") }.phase)
         assertEquals(0, f.posts)
-        f.end = 10_000
+        f.end = 2_000
         var solved = false
         assertEquals(AnswerPhase.FAILED, f.run { solved = true; reply() }.phase)
-        assertFalse(solved)
+        assertTrue(solved)
     }
     @Test fun timingUsesServerElapsedAndDeductsRoundTripInsteadOfPhoneWallClock() {
         val start = 1_700_000_000_000L
