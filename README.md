@@ -1,5 +1,9 @@
 # 伞课堂 RainNotify
 
+当前开发分支为 **0.1.4-internal / versionCode 27**，包含普通版、长江版、黄河版、荷塘版支持，先选择服务器再登录。完整题目先生成参考答案，再检查自动提交条件，用户可核对原图后手动确认提交。图片比较实际内容，比较失败时按用户授权退回文字核对。实现及验收记录见 [多服务器适配](docs/MULTI_SERVER.md) 与 [参考答案与提交分离](docs/REFERENCE_ANSWERS.md)。
+
+27 版 Debug、Release 各 155 项单元测试，以及 Android 16 手机上的 12 项独立组件测试已通过。真实课堂回执和新增服务器的账号流程待实测。下方公开下载入口对应 v0.1.3 / 25。
+
 适用于 **Android 16、普通版雨课堂**的独立辅助 App。开启课堂监听后，可接收新题通知、保存题干与原图，或通过 DeepSeek API 自动作答并提交；课后按课堂导出离线复习笔记。
 
 **[下载正式版 APK · v0.1.3](https://github.com/lanlikeliang/rainnotify/releases/download/v0.1.3/RainNotify-0.1.3-25.apk)** · [最新版本与更新说明](https://github.com/lanlikeliang/rainnotify/releases/latest) · [安装指南](docs/INSTALL.md)
@@ -132,6 +136,7 @@ v0.1.3（versionCode 25）在已实测的 0.1.3-internal（24）基础上去除�
 - [安装与升级](docs/INSTALL.md)
 - [版本更新记录](CHANGELOG.md)
 - [开发环境、测试与签名打包](docs/DEVELOPMENT.md)
+- [新对话接手入口、阶段总结与开发经验](docs/handoff/2026-10-29-v0.1.3/00_新对话必读_接手入口与目录导航.md)（2026-10-29，v0.1.3）
 - [课堂功能实现与边界](docs/CLASSROOM_REVIEW.md)
 - [问题反馈](https://github.com/lanlikeliang/rainnotify/issues)：请提供 App 版本、Android 版本、机型和脱敏诊断，不要提交账号凭据、API Key 或真实课堂原始文件。
 

@@ -1,5 +1,7 @@
 # RainNotify development
 
+For project continuation, first read [the v0.1.3 handoff entry](docs/handoff/2026-10-29-v0.1.3/00_新对话必读_接手入口与目录导航.md); it distinguishes current requirements, historical experiments and version-specific evidence. Preserve any uncommitted handoff documentation.
+
 Native Kotlin Android app, API 36 only. Read `docs/DEVELOPMENT.md` before changing tooling.
 
 - Standard Windows check: `./tools/build_android.ps1 -Lint -UnitTests`.
