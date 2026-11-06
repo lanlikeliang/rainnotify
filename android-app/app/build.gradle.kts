@@ -15,8 +15,8 @@ android {
         applicationId = "cn.rainnotify.app"
         minSdk = 36
         targetSdk = 36
-        versionCode = providers.gradleProperty("releaseVersionCode").orElse("25").get().toInt()
-        versionName = providers.gradleProperty("releaseVersionName").orElse("0.1.3").get()
+        versionCode = providers.gradleProperty("releaseVersionCode").orElse("27").get().toInt()
+        versionName = providers.gradleProperty("releaseVersionName").orElse("0.1.4-internal").get()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "GIT_COMMIT", "\"${providers.gradleProperty("gitCommit").orElse("local").get().replace(Regex("[^a-zA-Z0-9-]"), "")}\"")
     }

@@ -28,6 +28,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.core.net.toUri
 import cn.rainnotify.app.answer.*
 import cn.rainnotify.app.auth.RainLoginViewModel
+import cn.rainnotify.app.auth.RainServer
 import cn.rainnotify.app.ui.*
 import cn.rainnotify.app.question.StudyClassrooms
 import cn.rainnotify.app.monitor.ConnectionState
@@ -82,6 +83,7 @@ class MainActivity : ComponentActivity() {
         var confirmation by remember { mutableStateOf<ClassroomMode?>(null) }
         var logoutConfirmation by remember { mutableStateOf(false) }
         var deleteConfirmation by remember { mutableStateOf(false) }
+        var manualConfirmation by remember { mutableStateOf<Pair<cn.rainnotify.app.question.QuestionRecord, AnswerTask>?>(null) }
         LaunchedEffect(navigationEvent) {
             when (intent.getStringExtra(TAB)) {
                 "question" -> route = AppPage.CLASSROOM.name
@@ -89,6 +91,13 @@ class MainActivity : ComponentActivity() {
                 "account" -> route = "CLASSROOM>ACCOUNT"
             }
             intent.removeExtra(TAB)
+        }
+
+
+        manualConfirmation?.let { (record, answer) ->
+            ReferenceSubmissionDialog(record, answer,
+                confirm = { manualConfirmation = null; home.submitConfirmed(record.id, answer.id) },
+                dismiss = { manualConfirmation = null })
         }
 
         BackHandler(page != AppPage.CLASSROOM) { back() }
@@ -108,7 +117,10 @@ class MainActivity : ComponentActivity() {
                             if (required.isNotEmpty()) missing=required else confirmation=target
                         }
                     },
-                        latest = { s.latest?.let { selectedQuestion=it.id;go(AppPage.QUESTION_DETAIL) } })
+                        latest = { s.latest?.let { selectedQuestion=it.id;go(AppPage.QUESTION_DETAIL) } },
+                        imageFile = { id, index -> home.repository.answerImage(id, index) },
+                        submit = { record, answer -> manualConfirmation = record to answer },
+                        submissionIssue = home::manualSubmissionIssue)
                     AppPage.QUESTION -> ClassArchivePage(s.records) { selectedClass=it;go(AppPage.CLASS_NOTES) }
                     AppPage.CLASS_NOTES -> {
                         val group = StudyClassrooms.group(s.records).firstOrNull { it.key==selectedClass }
@@ -122,18 +134,20 @@ class MainActivity : ComponentActivity() {
                     AppPage.QUESTION_DETAIL -> {
                         val record = s.records.firstOrNull { it.id==selectedQuestion } ?: s.latest?.takeIf { it.id==selectedQuestion }
                         QuestionPage(record,s.answers[selectedQuestion] ?: s.answer?.takeIf { it.questionId==selectedQuestion },ClassroomMode.OFF,
-                            { id,index -> home.repository.image(id,index) },::back)
+                            { id,index -> home.repository.answerImage(id,index) },::back,
+                            submit = { question, answer -> manualConfirmation = question to answer },
+                            submissionIssue = home::manualSubmissionIssue)
                     }
-                    AppPage.CLASSES -> Page("当前课堂","先在微信扫码入课，再连接本 App",::back) {
+                    AppPage.CLASSES -> Page("当前课堂",(s.login.server?.label ?: "请先选择服务器")+" · 微信扫码后连接",::back) {
                         if(!s.login.authenticated) Button(onClick={go(AppPage.ACCOUNT)}) { Text("先授权雨课堂账号") }
                         else {
                             if(s.login.lessons.isEmpty()) Text("暂未发现正在上课的课堂。请先在微信扫码，再刷新。",color=Muted)
                             s.login.lessons.forEach { lesson -> Panel {
                                 InfoRow(lesson.courseName ?: "课程名称暂未返回",lesson.classroomName,
-                                    if(s.lesson?.id==lesson.id || s.monitor.lessonId==lesson.id) "已选择" else "选择", "class") { home.selectLesson(lesson) }
+                                    if(s.lesson?.id==lesson.id || (s.monitor.active && s.monitor.server==s.login.server && s.monitor.lessonId==lesson.id)) "已选择" else "选择", "class") { home.selectLesson(lesson) }
                             } }
                             OutlinedButton(onClick={login.refresh()},enabled=!s.login.busy) { Text("刷新课堂") }
-                            if(s.lesson!=null || s.monitor.lessonId!=null) Panel {
+                            if(s.lesson!=null || (s.monitor.active && s.monitor.server==s.login.server)) Panel {
                                 Text(s.monitor.lessonName.takeIf { s.monitor.active } ?: s.lesson?.displayName.orEmpty(),fontWeight=FontWeight.SemiBold)
                                 Text(when {
                                     s.monitor.active && s.monitor.connection==ConnectionState.LISTENING -> "课堂已连接，可以接收新题。"
@@ -152,7 +166,10 @@ class MainActivity : ComponentActivity() {
                     }
                     AppPage.SETTINGS -> Page("设置","连接与运行配置") {
                         Text("账号",fontWeight=FontWeight.SemiBold)
-                        Panel { InfoRow("雨课堂账号",s.login.displayName ?: if(s.login.authenticated) "已授权" else "未授权",kind="account") { go(AppPage.ACCOUNT) } }
+                        Panel {
+                            InfoRow("雨课堂服务器",s.login.server?.label ?: "未选择") { go(AppPage.ACCOUNT) }
+                            InfoRow("雨课堂账号",s.login.displayName ?: if(s.login.authenticated) "已授权" else "未授权",kind="account") { go(AppPage.ACCOUNT) }
+                        }
                         Text("AI 服务",fontWeight=FontWeight.SemiBold)
                         Panel {
                             InfoRow("服务商与模型",s.model.displayName, s.model.capability, "model") { go(AppPage.API) }
@@ -169,9 +186,13 @@ class MainActivity : ComponentActivity() {
                         }
                         TextButton(onClick={go(AppPage.ABOUT)}) { Text("关于与帮助") }
                     }
-                    AppPage.ACCOUNT -> Page("雨课堂账号","微信授权后读取当前课堂",::back) {
-                        Panel {
-                            Text(s.login.displayName ?: if(s.login.authenticated) "雨课堂已授权" else "普通版雨课堂",fontSize=20.sp,fontWeight=FontWeight.SemiBold)
+                    AppPage.ACCOUNT -> Page("雨课堂账号","先选择服务器，再登录账号",::back) {
+                        ServerSelection(s.login.server) { login.selectServer(it) }
+                        if (s.login.server == null) Text(s.login.message, color=Muted)
+                        else Panel {
+                            Text("2. 登录账号",fontWeight=FontWeight.SemiBold)
+                            Text(s.login.displayName ?: s.login.server!!.label,fontSize=20.sp,fontWeight=FontWeight.SemiBold)
+                            if(s.login.server!!.experimental) Text("此服务器为测试支持，真实课堂连接与提交尚待验证。",color=Amber,fontSize=13.sp)
                             if(s.login.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                             Text(s.login.message,color=Muted)
                             s.login.qr?.let { qr ->
@@ -231,7 +252,7 @@ class MainActivity : ComponentActivity() {
                 Text("开始前还需要",fontSize=24.sp,fontWeight=FontWeight.Bold)
                 missing.forEach { requirement -> TextButton(onClick={
                     val destination=when(requirement) {
-                        Requirement.ACCOUNT -> AppPage.ACCOUNT
+                        Requirement.SERVER,Requirement.ACCOUNT -> AppPage.ACCOUNT
                         Requirement.CLASSROOM,Requirement.CLASSROOM_SCAN -> AppPage.CLASSES
                         Requirement.NOTIFICATIONS -> AppPage.NOTIFICATIONS
                         Requirement.BACKGROUND -> AppPage.BACKGROUND
@@ -253,7 +274,7 @@ class MainActivity : ComponentActivity() {
                 if(target==ClassroomMode.AUTO) "新题的题干和原图会发送到 DeepSeek，按服务商规则计费；有效答案将自动提交到雨课堂。AI 可能答错。\n\n停止或切回发题通知可取消后续处理，已发出的提交无法撤销。"
                 else "只接收并提醒新题，不调用 API，不自动提交。\n\n切出 App 或熄屏时，请保持本 App 后台运行与网络可用。")
         },confirmButton={TextButton(onClick={confirmation=null;home.request(target)}){Text("确认开启")}},dismissButton={TextButton(onClick={confirmation=null}){Text("取消")}}) }
-        if(logoutConfirmation) AlertDialog(onDismissRequest={logoutConfirmation=false},title={Text("退出雨课堂账号？")},text={Text("会关闭监听与自动答题。已发出的提交无法撤销，API 配置保留。")},
+        if(logoutConfirmation) AlertDialog(onDismissRequest={logoutConfirmation=false},title={Text("退出雨课堂账号？")},text={Text("会退出当前服务器的账号，并关闭监听与自动答题。其他服务器的登录、课堂笔记和 API 配置保留。已发出的提交无法撤销。")},
             confirmButton={TextButton(onClick={logoutConfirmation=false;home.beforeLogout();login.logout()}){Text("退出")}},dismissButton={TextButton(onClick={logoutConfirmation=false}){Text("取消")}})
         if(deleteConfirmation) AlertDialog(onDismissRequest={deleteConfirmation=false},title={Text("删除本机 API Key？")},text={Text("请先关闭自动答题再删除密钥；发题通知不受影响。")},
             confirmButton={TextButton(onClick={deleteConfirmation=false;home.deleteKey()}){Text("删除")}},dismissButton={TextButton(onClick={deleteConfirmation=false}){Text("取消")}})

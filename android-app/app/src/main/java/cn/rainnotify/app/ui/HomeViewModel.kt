@@ -59,6 +59,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         if (boundLogin === source) return
         boundLogin = source
         observe(source) {
+            if (login.server != it.server) {
+                if (MonitorState.current().active && MonitorState.current().server != it.server) stop()
+                selected = null; scannedLesson = null; repository.hideLatest()
+                if (!MonitorState.current().active) MonitorState.update(MonitorUiState())
+                message = ""
+            }
             login = it
             if (it.sessionExpired && MonitorState.current().active) {
                 stop()
@@ -81,8 +87,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val monitor = MonitorState.current()
         val records = repository.records.value.orEmpty().filter { !it.offline }
         val lessonId = monitor.lessonId.takeIf { monitor.active } ?: selected?.id
-        val latest = (repository.latest.value?.takeIf { lessonId == null || it.reference.lessonId == lessonId }
-            ?: records.firstOrNull { lessonId == null || it.reference.lessonId == lessonId })
+        val server = monitor.server.takeIf { monitor.active } ?: login.server
+        fun matches(record: QuestionRecord) = record.server == server &&
+            (lessonId == null || record.reference.lessonId == lessonId)
+        val latest = repository.latest.value?.takeIf(::matches) ?: records.firstOrNull(::matches)
         val answer = AnswerState.task.value?.takeIf { ModePolicy.answerBelongsToLatest(latest?.id, it.questionId) }
             ?: repository.answers.value?.get(latest?.id)
         mutable.value = HomeState(login, selected, monitor,
@@ -96,7 +104,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         val s = mutable.value!!
         return ModePolicy.missing(target, ModeRequirements(s.login.authenticated || (s.monitor.active && s.monitor.established),
             s.lesson != null || (s.monitor.active && s.monitor.established), s.notification?.canPost == true,
-            s.notification?.backgroundRestricted == true, s.apiSaved, s.apiVerified)).toMutableList().apply {
+            s.notification?.backgroundRestricted == true, s.apiSaved, s.apiVerified, s.login.server != null)).toMutableList().apply {
                 if (target != ClassroomMode.OFF && s.login.authenticated && s.lesson != null &&
                     !s.monitor.active && scannedLesson != s.lesson.id) add(Requirement.CLASSROOM_SCAN)
             }
@@ -124,14 +132,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             } else if (!AutoAnswer.arm(app)) explain("自动答题未开启，请检查配置或等待当前题目结束。")
             refresh(); return
         }
+        val server = login.server ?: return
         val lesson = selected ?: return
         // Do not optimistically paint the requested mode as running.
         MonitorState.stopRequested = false
         MonitorState.automaticRequested = target == ClassroomMode.AUTO
         MonitorState.update(MonitorUiState(active = true, message = "正在准备课堂连接…",
-            lessonId = lesson.id, lessonName = lesson.displayName))
+            lessonId = lesson.id, lessonName = lesson.displayName, server = server))
         try {
             app.startForegroundService(Intent(app, LessonMonitorService::class.java).setAction(LessonMonitorService.START)
+                .putExtra(LessonMonitorService.SERVER, server.id)
                 .putExtra(LessonMonitorService.LESSON_ID, lesson.id).putExtra(LessonMonitorService.LESSON_NAME, lesson.displayName)
                 .putExtra(LessonMonitorService.AUTOMATIC, target == ClassroomMode.AUTO))
         } catch (_: RuntimeException) {
@@ -150,6 +160,26 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun beforeLogout() { stop(); selected = null; scannedLesson = null; repository.hideLatest(); message = "" }
     fun explain(value: String) { message = value; refresh() }
+
+    fun manualSubmissionIssue(record: QuestionRecord, answer: AnswerTask?): String? {
+        if (AnswerService.running || AnswerState.task.value?.active == true || AutoAnswer.ticket != null) return "请等待当前作答流程结束。"
+        val active = repository.currentBinding()
+        if (active?.api?.server != ServerSettings.selected(app)) return "请连接本题所属服务器后提交。"
+        return ManualSubmission.issue(record, answer, active?.api?.server, active?.accountScope, active?.lesson)
+    }
+
+    fun submitConfirmed(questionId: String, taskId: String) {
+        val record = repository.records.value.orEmpty().firstOrNull { it.id == questionId } ?: return
+        val answer = AnswerState.task.value?.takeIf { it.questionId == questionId } ?: repository.answers.value?.get(questionId)
+        if (answer?.id != taskId) { explain("参考答案已更新，请重新查看并确认。"); return }
+        manualSubmissionIssue(record, answer)?.let { explain(it); return }
+        try {
+            app.startForegroundService(Intent(app, AnswerService::class.java).setAction(AnswerService.MANUAL_SUBMIT)
+                .putExtra(AnswerService.QUESTION, questionId).putExtra(AnswerService.TASK, taskId))
+            explain("已请求提交，请查看本题处理状态。")
+        } catch (_: RuntimeException) { explain("系统未允许启动提交，请重新打开 App 后再试。"); }
+    }
+
     fun confirmScanned() { scannedLesson = selected?.id; refresh() }
     fun exportClassroom(uri: android.net.Uri, key: String) {
         if (exporting) return
@@ -168,7 +198,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             apiMessage = "自动答题运行中，当前模式保持不变。请先在课堂切回发题通知，再进行自检或修改 API。"
             refresh(); return false
         }
-        if (apiRun != null || AnswerState.task.value?.active == true || AutoAnswer.ticket != null) {
+        if (apiRun != null || AnswerService.running || AnswerState.task.value?.active == true || AutoAnswer.ticket != null) {
             apiMessage = "请先结束当前自检或作答任务，再修改 API。"; refresh(); return false
         }
         return true

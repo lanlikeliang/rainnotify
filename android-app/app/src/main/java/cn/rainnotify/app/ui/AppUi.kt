@@ -130,11 +130,16 @@ val Amber = Color(0xFF946009)
 }
 
 @Composable fun ClassroomPage(s: HomeState, account: () -> Unit, classroom: () -> Unit, api: () -> Unit,
-    choose: (ClassroomMode) -> Unit, latest: () -> Unit = {}) {
+    choose: (ClassroomMode) -> Unit, latest: () -> Unit = {},
+    imageFile: (String, Int) -> File? = { _, _ -> null },
+    submit: (QuestionRecord, AnswerTask) -> Unit = { _, _ -> },
+    submissionIssue: (QuestionRecord, AnswerTask?) -> String? = { _, _ -> "请连接对应课堂后提交。" }) {
     val confirmed = s.login.authenticated || (s.monitor.active && s.monitor.established)
     val connecting = s.monitor.active && !s.monitor.established
     Page("课堂") {
         Panel {
+            InfoRow("当前服务器", s.login.server?.label ?: "未选择", if(s.login.server == null) "先选择" else "", action = account)
+            HorizontalDivider(color = CanvasColor)
             InfoRow("当前账户", s.login.displayName ?: if (confirmed) "已授权账户" else "未授权",
                 if (confirmed) "已授权" else if (s.login.busy) "验证中" else "去授权", "account", account)
             HorizontalDivider(color = CanvasColor)
@@ -165,8 +170,8 @@ val Amber = Color(0xFF946009)
                     fontSize = 12.sp, color = Teal, textAlign = TextAlign.Center)
             }
         }
-        if (!confirmed) Text("首次使用：先授权账户，再选择课堂。", color = Muted, fontSize = 14.sp)
-        LatestQuestionSummary(s.latest,s.answer,latest)
+        if (!confirmed) Text("首次使用：先选择服务器，再登录账号和选择课堂。", color = Muted, fontSize = 14.sp)
+        LatestQuestionSummary(s.latest, s.answer, latest, imageFile, submit, submissionIssue)
         if (s.message.isNotBlank()) Text(s.message, color = Muted, fontSize = 14.sp)
         if ((s.monitor.active && s.monitor.connection != ConnectionState.LISTENING) ||
             (!s.monitor.active && s.monitor.message !in setOf(MonitorUiState().message,
@@ -175,12 +180,30 @@ val Amber = Color(0xFF946009)
     }
 }
 
-@Composable fun QuestionPage(record: QuestionRecord?, answer: AnswerTask?, mode: ClassroomMode, imageFile: (String, Int) -> File?, back: (() -> Unit)? = null) {
+
+@Composable fun ReferenceSubmissionDialog(record: QuestionRecord, answer: AnswerTask, confirm: () -> Unit, dismiss: () -> Unit) {
+    val question = answer.sourceQuestion ?: record.content
+    AlertDialog(onDismissRequest = dismiss,
+        title = { Text("确认提交这道题的参考答案") },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(record.server.label + " · " + (question?.typeName ?: "题目") + " · " + receivedTime(record.receivedAt, true))
+            Text(answer.answer.joinToString(if (question?.type == 4) "\n" else "、"))
+            Text("请确认上方题目原图和参考答案对应当前课堂题目。确认后直接发送，跳过题目变化、剩余时间和已作答状态复核。")
+        } },
+        confirmButton = { TextButton(onClick = confirm) { Text("已核对，直接提交") } },
+        dismissButton = { TextButton(onClick = dismiss) { Text("返回查看") } })
+}
+
+@Composable fun QuestionPage(record: QuestionRecord?, answer: AnswerTask?, mode: ClassroomMode, imageFile: (String, Int) -> File?, back: (() -> Unit)? = null,
+    submit: (QuestionRecord, AnswerTask) -> Unit = { _, _ -> },
+    submissionIssue: (QuestionRecord, AnswerTask?) -> String? = { _, _ -> "请连接对应课堂后提交。" }) {
     Page("题目",back=back) {
         if (record == null) {
             Panel { Text("等待课堂发题", fontSize = 20.sp, fontWeight = FontWeight.SemiBold);Text("在课堂页开启发题通知或自动答题后，最新题目会显示在这里。", color = Muted) }
         } else {
-            val q = record.content
+            val ownAnswer = answer?.takeIf { ModePolicy.answerBelongsToLatest(record.id, it.questionId) }
+            val q = ownAnswer?.sourceQuestion ?: record.content
+            Text(record.server.label, color = Muted, fontSize = 13.sp)
             Text((q?.typeName ?: "正在获取") + " · " + SimpleDateFormat("HH:mm", Locale.CHINA).format(Date(record.receivedAt)), color = Muted)
             Panel {
                 if (record.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -196,12 +219,7 @@ val Amber = Color(0xFF946009)
                     if (record.imageErrors.isNotEmpty()) Text("部分原图未获取，自动作答将检查题目完整性。", color = Amber)
                 }
             }
-            val ownAnswer = answer?.takeIf { ModePolicy.answerBelongsToLatest(record.id, it.questionId) }
-            if (ownAnswer?.answer?.isNotEmpty() == true) Panel {
-                Text("AI 答案", fontWeight = FontWeight.SemiBold)
-                Text(ownAnswer.answer.joinToString(if (q?.type == 4) "\n" else "、"), fontSize = 22.sp, lineHeight = 32.sp)
-                Text(ownAnswer.model.displayName, color = Muted, fontSize = 12.sp)
-            }
+            Panel { ReferenceAnswer(record, ownAnswer, submit, submissionIssue(record, ownAnswer)) }
             Panel {
                 Text("处理状态", fontWeight = FontWeight.SemiBold)
                 if (ownAnswer?.active == true) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -224,17 +242,17 @@ fun phaseTitle(phase: AnswerPhase) = when(phase) {
     AnswerPhase.QUEUED -> "等待处理"
     AnswerPhase.PREPARING -> "正在获取题目"
     AnswerPhase.SOLVING -> "AI 正在作答"
-    AnswerPhase.CHECKING -> "正在校验答案"
+    AnswerPhase.CHECKING -> "正在检查自动提交条件"
     AnswerPhase.SUBMITTING -> "正在提交"
     AnswerPhase.SUBMITTED -> "已提交 · 雨课堂已确认"
-    AnswerPhase.ALREADY_ANSWERED -> "本题已作答，未重复提交"
+    AnswerPhase.ALREADY_ANSWERED -> "雨课堂显示本题已作答"
     AnswerPhase.UNCERTAIN -> "提交结果待确认"
     AnswerPhase.CANCELLED -> "已停止"
-    AnswerPhase.FAILED -> "处理失败 · 未提交"
+    AnswerPhase.FAILED -> "本次流程未完成"
     AnswerPhase.REHEARSED -> "未提交"
 }
 
-@Composable private fun LocalQuestionImage(file: File?, loading: Boolean, error: String?) {
+@Composable fun LocalQuestionImage(file: File?, loading: Boolean, error: String?) {
     if (file == null) { Text(error ?: if (loading) "正在加载原图…" else "原图暂不可用", color = Muted); return }
     val stamp = file.lastModified()
     val bitmap by produceState<android.graphics.Bitmap?>(null, file.path, stamp, loading) {
